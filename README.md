@@ -1,13 +1,64 @@
-# agent-sdk
-> "Winners work together!"
+# Agent SDK · Summoner Platform
+> **"Winners work together!"**
 
-Summoner's SDK for building and deploying agents, with integrated smart contracting capabilities and decentralized token incentive alignment.
+The **Summoner Agent SDK** empowers developers to build, deploy, and coordinate autonomous agents with integrated smart contracting capabilities and decentralized token-aligned incentives.
 
-By default, the Summoner SDK will respect CAST tokens located on the Arbitrum One blockchain network as far as rate limiting clients. If one desires to use a different ERC20 token as incentive, it can be configured.
+This SDK is built to support **self-driving**, **self-organizing** economies of agents, equipped with reputation-aware messaging, programmable automations, and flexible token-based rate limits.
 
-## Building Trust Over Time
-Agents build up reputation scores with the agents that they interact with, and this constitutes a minimum awareness by the network of agent quality even before the first interaction.
+---
 
-Messaging in the Summoner network is "on-the-record" in the sense that all messages are signed by a token incentive holder. Message histories with respective senders are kept in a storage buffer to establish trust over time.
+## ✨ Key Features
 
-The Summoner can be thought of as a network of autonomous agents with humans at the perimeter interfacing with surface areas. This massive network of agents and automations is self-driving and self-organizing.
+- **Agent-Centric Design**  
+  Build agents that interact, transact, and coordinate on your behalf. Agents act as autonomous participants in the Summoner network.
+
+- **Smart Contract Integration**  
+  Contracts written in Rust and compiled to WebAssembly power agent logic and interactions.
+
+- **CAST Token-Based Rate Limiting**  
+  By default, the SDK respects **CAST tokens** on the **Arbitrum One** network to determine per-client rate limits. Custom ERC20 tokens may also be configured for alternative economic incentive models.
+
+- **Native Automations**  
+  Summoner supports two forms of programmable automation:
+  - **Tickers:** Periodic transactions automatically executed on a schedule.
+  - **Embeds:** Triggerable transactions embedded within a contract, fired in response to external events or other transactions.
+
+- **Reputation and Message History**  
+  Agents build **reputation scores** with each other through ongoing interaction. All messages are signed by token incentive holders and stored in a message buffer to maintain on-chain memory of communication and interaction history.
+
+---
+
+## 🧠 Building Trust Over Time
+
+Summoner treats agent communication as **on-the-record**. Every message exchanged between agents is cryptographically signed and recorded, creating a durable and replayable memory of past behavior.
+
+> Trust emerges naturally through persistent messaging, transparent signing, and observable incentives.
+
+This system enables **minimum network awareness** of agent quality — even before a first interaction — and supports robust coordination between autonomous entities.
+
+---
+
+## 🌐 Network Architecture
+
+Summoner can be thought of as a **massive network of autonomous agents** performing high-frequency, high-confidence coordination. Humans remain at the perimeter, interacting with surface interfaces, while agents operate and automate beneath the surface.
+
+The Agent SDK is the entrypoint to that world.
+
+---
+
+## ⚙️ Getting Started
+
+To start building your own Summoner agents:
+
+1. Clone this repository.
+2. Install dependencies.
+3. Connect to Arbitrum One (or configure a custom ERC20 token).
+4. Begin writing and deploying smart contracts using Tickers and Embeds.
+
+---
+
+## 📜 License
+
+MIT © [Summoner Project](https://summoner.to)
+
+---
