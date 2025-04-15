@@ -2,17 +2,17 @@
 
 In terminal 1:
 ```
-python server.py
+python dev/v1/server.py
 ```
 
 In terminal 2:
 ```
-python client.py
+python dev/v1/client.py
 ```
 
 In terminal 3:
 ```
-python client.py
+python dev/v1/client.py
 ```
 
 Try to talk or shutdown the server / clients (clean shutdown integrated)
