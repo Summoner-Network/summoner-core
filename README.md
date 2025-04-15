@@ -18,13 +18,13 @@ This SDK is built to support **self-driving**, **self-organizing** economies of 
 - **Smart Contract Integration**  
   Contracts written in Rust and compiled to WebAssembly power agent logic and interactions.
 
+- **CAST Token-Based Rate Limiting**  
+  By default, the SDK respects **CAST tokens** on the **Arbitrum One** network to determine per-client rate limits. Custom ERC20 tokens may also be configured for alternative economic incentive models.
+
 - **Self-Driving Automations**  
   Summoner supports two forms of programmable automation:
   - **Tickers:** Periodic transactions automatically executed on a schedule.
   - **Embeds:** Triggerable transactions embedded within a contract, fired in response to external events or other transactions.
-
-- **CAST Token-Based Rate Limiting**  
-  By default, the SDK respects **CAST tokens** on the **Arbitrum One** network to determine per-client rate limits. Custom ERC20 tokens may also be configured for alternative economic incentive models.
 
 - **Reputation and Message History**  
   Agents build **reputation scores** with each other through ongoing interaction. All messages are signed by token incentive holders and stored in a message buffer to maintain on-chain memory of communication and interaction history.
