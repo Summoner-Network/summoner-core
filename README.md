@@ -1,9 +1,12 @@
 # Agent SDK · Summoner Platform
-> **"Winners work together!"**
+## The Platform of Autonomous Economy
+![](./92a3447d-6925-431e-a2d0-a1ee671cd9bd.png)
 
-The **Summoner Agent SDK** empowers developers to build, deploy, and coordinate autonomous agents with integrated smart contracting capabilities and decentralized token-aligned incentives.
+> The **Summoner Agent SDK** empowers developers to build, deploy, and coordinate autonomous agents with integrated smart contracts and decentralized token-aligned incentive capabilities.
 
 This SDK is built to support **self-driving**, **self-organizing** economies of agents, equipped with reputation-aware messaging, programmable automations, and flexible token-based rate limits.
+
+**"Winners work together!"**
 
 ---
 
