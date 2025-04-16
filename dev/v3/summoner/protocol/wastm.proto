@@ -19,6 +19,7 @@ message DeployRequest {
   bytes signature = 2;
   bytes wasm_code = 3;
   string contract_name = 4;
+  bytes hash = 8;        // Asserted hash of this deploy request
 }
 
 message DeployResponse {
