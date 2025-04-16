@@ -1,0 +1,42 @@
+syntax = "proto3";
+// DRAFT
+package wastm;
+
+import "google/protobuf/bytes.proto";
+
+// Core WASTM executor interface.
+service WASTMExecutor {
+  // Deploy a WASM contract into persistent state.
+  rpc Deploy(DeployRequest) returns (DeployResponse);
+
+  // Invoke an exported function in a deployed contract.
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+// Request to deploy a signed WASM contract.
+message DeployRequest {
+  bytes signer = 1;         // public key or address of deployer
+  bytes signature = 2;      // signature over the payload
+  bytes wasm_code = 3;      // raw WASM module bytes
+  string contract_name = 4; // human-readable contract ID
+}
+
+// Response with contract deployment hash (u256).
+message DeployResponse {
+  bytes contract_id = 1; // 32-byte ID (e.g. Keccak256 hash)
+}
+
+// Request to invoke a method in a deployed contract.
+message InvokeRequest {
+  bytes signer = 1;         // public key or address of caller
+  bytes signature = 2;      // signature over the payload
+  bytes contract_id = 3;    // 32-byte ID matching DeployResponse
+  string method = 4;        // exported function name
+  bytes input = 5;          // ABI-encoded input
+  uint64 gas_limit = 6;     // max gas (optional enforcement)
+}
+
+// Response with 32-byte return value (e.g. ABI-encoded u256).
+message InvokeResponse {
+  bytes return_value = 1; // raw return value (ABI encoded u256)
+}
