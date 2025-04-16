@@ -1,5 +1,5 @@
 syntax = "proto3";
-// DRAFT
+
 package wastm;
 
 import "google/protobuf/bytes.proto";
@@ -9,34 +9,43 @@ service WASTMExecutor {
   // Deploy a WASM contract into persistent state.
   rpc Deploy(DeployRequest) returns (DeployResponse);
 
-  // Invoke an exported function in a deployed contract.
+  // Invoke one or more methods in deployed contracts.
   rpc Invoke(InvokeRequest) returns (InvokeResponse);
 }
 
 // Request to deploy a signed WASM contract.
 message DeployRequest {
-  bytes signer = 1;         // public key or address of deployer
-  bytes signature = 2;      // signature over the payload
-  bytes wasm_code = 3;      // raw WASM module bytes
-  string contract_name = 4; // human-readable contract ID
+  bytes signer = 1;
+  bytes signature = 2;
+  bytes wasm_code = 3;
+  string contract_name = 4;
 }
 
-// Response with contract deployment hash (u256).
 message DeployResponse {
-  bytes contract_id = 1; // 32-byte ID (e.g. Keccak256 hash)
+  bytes contract_id = 1; // 32-byte identifier
 }
 
-// Request to invoke a method in a deployed contract.
+// Batched invoke request
 message InvokeRequest {
-  bytes signer = 1;         // public key or address of caller
-  bytes signature = 2;      // signature over the payload
-  bytes contract_id = 3;    // 32-byte ID matching DeployResponse
-  string method = 4;        // exported function name
-  bytes input = 5;          // ABI-encoded input
-  uint64 gas_limit = 6;     // max gas (optional enforcement)
+  repeated InvokeRequestInner calls = 1;
 }
 
-// Response with 32-byte return value (e.g. ABI-encoded u256).
+// Single invocation call within a batch.
+message InvokeRequestInner {
+  bytes signer = 1;        // public key or address
+  bytes signature = 2;     // signature over the payload
+  bytes contract_id = 3;   // target contract ID
+  string method = 4;       // exported function name
+  bytes input = 5;         // ABI-encoded input
+  uint64 gas_limit = 6;    // optional gas cap
+}
+
+// Response to a batched invocation.
 message InvokeResponse {
-  bytes return_value = 1; // raw return value (ABI encoded u256)
+  repeated InvokeReturn returns = 1;
+}
+
+// Individual return value for each inner call.
+message InvokeReturn {
+  bytes return_value = 1; // ABI-encoded output (e.g., u256)
 }
