@@ -47,3 +47,8 @@ cargo run --bin summoner-e2e -- --endpoint http://localhost:50051
 - Add new domain-specific tests by implementing the `Scenario` trait.
 - Plug in custom workloads and verify they produce consistent world states.
 - Leverage the included profiler hooks to gather metrics across test runs.
+
+---
+
+TODO: Tests to write:
+1. Test deploying the same contract from two different accounts. Ensure two different contracts are created.
