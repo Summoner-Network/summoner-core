@@ -39,6 +39,7 @@ message InvokeRequestInner {
   bytes input = 5;         // ABI-encoded input
   uint64 gas_limit = 6;    // Optional gas cap
   uint64 nonce = 7;        // Unique per-signer value for replay protection
+  bytes hash = 8;          // Asserted hash of this invoke request inner
 }
 
 // Response to a batched invocation.
