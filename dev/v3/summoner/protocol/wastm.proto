@@ -50,5 +50,5 @@ message InvokeResponse {
 
 // Individual return value for each inner call.
 message InvokeReturn {
-  bytes return_value = 1; // ABI-encoded output (e.g., u256)
+  bytes return_value = 1; // 32-byte identifier
 }
