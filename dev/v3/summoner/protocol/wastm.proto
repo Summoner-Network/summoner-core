@@ -19,7 +19,8 @@ message DeployRequest {
   bytes signature = 2;
   bytes wasm_code = 3;
   string contract_name = 4;
-  bytes hash = 8;        // Asserted hash of this deploy request
+  bytes hash = 8;          // Asserted hash of this deploy request
+  bytes token_address = 9; // Address of the token asserted for rate limiting
 }
 
 message DeployResponse {
@@ -41,6 +42,7 @@ message InvokeRequestInner {
   uint64 gas_limit = 6;    // Optional gas cap
   uint64 nonce = 7;        // Unique per-signer value for replay protection
   bytes hash = 8;          // Asserted hash of this invoke request inner
+  bytes token_address = 9; // Address of the token asserted for rate limiting
 }
 
 // Response to a batched invocation.

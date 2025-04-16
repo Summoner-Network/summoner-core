@@ -1,7 +1,3 @@
-Sure — here’s a more detailed and contextual elaboration of that **WASTM** section, incorporating the connection to **BlockSTM** and its application in **WebAssembly**:
-
----
-
 # server  
 ## Web Assembly Software Transactional Memory (WASTM)  
 > WASTM is pronounced "Waste 'Em"
