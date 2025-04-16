@@ -32,12 +32,13 @@ message InvokeRequest {
 
 // Single invocation call within a batch.
 message InvokeRequestInner {
-  bytes signer = 1;        // public key or address
-  bytes signature = 2;     // signature over the payload
-  bytes contract_id = 3;   // target contract ID
-  string method = 4;       // exported function name
+  bytes signer = 1;        // Public key or address
+  bytes signature = 2;     // Signature over the payload
+  bytes contract_id = 3;   // Target contract ID
+  string method = 4;       // Exported function name
   bytes input = 5;         // ABI-encoded input
-  uint64 gas_limit = 6;    // optional gas cap
+  uint64 gas_limit = 6;    // Optional gas cap
+  uint64 nonce = 7;        // Unique per-signer value for replay protection
 }
 
 // Response to a batched invocation.
