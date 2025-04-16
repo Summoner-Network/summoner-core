@@ -33,6 +33,12 @@ WASTM targets applications where **parallelism**, **determinism**, and **replaya
   - Execution remains deterministic across replays.
   - No double-counting or lost writes occur, even under high concurrency.
 
+#### 2. Implement a single-pass one-by-one block execution loop in-memory.
+- Pass the performance and correctness tests that were created.
+- Map out the basic primitives and abstractions in a simple world.
+- Demonstrate cross-contract call capability, at least 60 transactions/sec.
+- Implement in secure, sound, and production-appropriate details.
+  - Lay the foundations for assuming wild success.
 ...
 
 ---
