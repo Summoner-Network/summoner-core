@@ -1,21 +1,18 @@
-# Summoner's SDK
+# SDK v1: completed
 
-### Current status
+In terminal 1:
+```
+python dev/v1/server.py
+```
 
-- Handles reconnection, shutdown, and custom logic ✅
-- Is robust for development / testing ✅
-- But still needs a few things for production 👇
+In terminal 2:
+```
+python dev/v1/client.py
+```
 
-### To become production-ready:
+In terminal 3:
+```
+python dev/v1/client.py
+```
 
-| Requirement | Status | Needed? |
-|-------------|--------|---------|
-| **TLS/SSL** | ❌ | Yes, for WAN use |
-| **Auth & Identity** | ❌ | Needed for real-world sessions |
-| **Error logging** | ⚠️ Minimal | Use `logging` module w/ levels |
-| **Structured logs or metrics** | ❌ | Optional: Prometheus or JSON logs |
-| **Auto-restart / service** | ❌ | Systemd, Docker, or Supervisor |
-| **Testing** | ⚠️ Manual | Add `pytest` + test harnesses |
-| **Deployment config** | ❌ | e.g., Dockerfile, Makefile |
-| **Versioning of protocol** | ❌ | Important for future upgrades |
-
+Try to talk or shutdown the server / clients (clean shutdown integrated)

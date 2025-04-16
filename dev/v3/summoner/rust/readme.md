@@ -30,6 +30,7 @@ or with [brew](https://formulae.brew.sh/formula/rust):
 
 ```
 brew install rust
+brew install rustup
 ```
 
 Then restart your terminal and run:
