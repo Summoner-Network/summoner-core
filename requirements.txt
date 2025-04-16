@@ -2,3 +2,5 @@ pytest==8.3.5
 asyncio==3.4.3
 aioconsole==0.8.1
 maturin==1.8.3
+grpcio==1.71.0
+grpcio-tools=1.71.0
