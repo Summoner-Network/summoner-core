@@ -6,7 +6,7 @@ Sure — here’s a more detailed and contextual elaboration of that **WASTM** s
 ## Web Assembly Software Transactional Memory (WASTM)  
 > WASTM is pronounced "Waste 'Em"
 
-WASTM is a Software Transactional Memory (STM) system inspired by [BlockSTM](https://github.com/aptos-labs/block-stm), adapted for WebAssembly-based smart contract execution. Like BlockSTM, it executes transactions optimistically and in parallel, resolving conflicts through a deterministic re-execution phase. However, WASTM is designed to support lightweight, embeddable runtimes — making it ideal for WebAssembly-based environments.
+WASTM is a Software Transactional Memory (STM) system inspired by [BlockSTM](https://arxiv.org/abs/2203.06871), adapted for WebAssembly-based smart contract execution. Like BlockSTM, it executes transactions optimistically and in parallel, resolving conflicts through a deterministic re-execution phase. However, WASTM is designed to support lightweight, embeddable runtimes — making it ideal for WebAssembly-based environments.
 
 WASTM targets applications where **parallelism**, **determinism**, and **replayability** are critical — such as smart contracting platforms, simulations, or autonomous agent execution.
 
