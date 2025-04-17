@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use num_cpus;
 use rayon::{prelude::*, ThreadPoolBuilder};
@@ -8,8 +9,44 @@ use rayon::{prelude::*, ThreadPoolBuilder};
 // MAIN
 
 fn main() {
-    println!("Hello, world!");
+    // Number of transactions to benchmark
+    let num_txs = 10_000;
+    // Prepare a batch of simple AddTx transactions
+    let mut txs: Vec<Box<dyn Transaction<usize, i32>>> = Vec::with_capacity(num_txs);
+    for i in 0..num_txs {
+        txs.push(Box::new(AddTx { key: i % 100, delta: 1 }));
+    }
+
+    // Create shared state
+    let state = State::<usize, i32>::new();
+
+    // Benchmark execution
+    let start = Instant::now();
+    let result = BlockSTM::execute_block(&txs, &state);
+    let duration = start.elapsed();
+
+    println!("Executed {} transactions in {:?}", num_txs, duration);
+    println!("Final value for key 0: {:?}", state.get(&0));
+    println!("Result map contains {}", result.len());
 }
+
+// Simple transaction that increments a key by a fixed delta
+struct AddTx {
+    key: usize,
+    delta: i32,
+}
+
+impl Transaction<usize, i32> for AddTx {
+    fn execute(&self, state: &State<usize, i32>) -> (HashMap<usize, Version>, HashMap<usize, i32>) {
+        let mut read = HashMap::new();
+        let mut write = HashMap::new();
+        let (cur, ver) = state.get(&self.key).unwrap_or((0, 0));
+        read.insert(self.key, ver);
+        write.insert(self.key, cur + self.delta);
+        (read, write)
+    }
+}
+
 
 // MAIN
 
@@ -82,7 +119,7 @@ impl BlockSTM {
     /// Execute a block of heterogeneous transactions in serial order semantics.
     /// Accepts a slice of boxed trait objects.
     pub fn execute_block<K, V>(
-        block: &[Box<dyn Transaction<K, V>>],
+        block: &Vec<Box<dyn Transaction<K, V>>>,
         global_state: &State<K, V>,
     ) -> HashMap<K, V>
     where
