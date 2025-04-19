@@ -2,6 +2,7 @@ trash/
 vibing/
 plan.txt
 comparative.md
+*.log.[1-9]
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
