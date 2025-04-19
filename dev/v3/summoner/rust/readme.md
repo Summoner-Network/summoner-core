@@ -54,7 +54,6 @@ You can now:
 - Build Rust packages callable from Python
 - Or wrap them in `.so` files and `import` them from Python
 
-I’ll walk you through this when you’re ready.
 
 ---
 
