@@ -80,7 +80,6 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
   - **Dismiss stale reviews** on new commits
   - **All review threads must be resolved**
   - **Allowed merge methods**: Merge, Squash, Rebase
-  - ❌ **Copilot code review** not automatically enabled
 - **🛡️ Code Scanning (Security)**
   - Tool: `CodeQL`
   - Thresholds: 
@@ -103,10 +102,7 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
   - Minimum **1 approving review**
   - **Approval required** on the **last push**
   - **All review threads must be resolved**
-  - **Code owner review not required**
-  - **Stale reviews are not dismissed**
   - **Allowed merge methods**: Merge, Squash, Rebase
-  - ❌ **Copilot code review** not automatically enabled
 - **🛡️ Code Scanning (Security)**
   - Tool: `CodeQL`
   - Thresholds: 
