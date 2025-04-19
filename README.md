@@ -39,17 +39,17 @@ SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
 
 In terminal 1:
 ```
-python worker/myserver.py
+python user_space/myserver.py
 ```
 
 In terminal 2:
 ```
-python worker/myclient.py
+python user_space/myclient.py
 ```
 
 In terminal 3:
 ```
-python worker/myclient.py
+python user_space/myclient.py
 ```
 
 Try to talk or shutdown the server / clients (clean shutdown integrated)

@@ -3,7 +3,7 @@ vibing/
 plan.txt
 comparative.md
 *.log.[1-9]
-core/asyncagent.py
+summoner/core/asyncagent.py
 .DS_Store
 
 # Byte-compiled / optimized / DLL files
