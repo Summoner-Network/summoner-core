@@ -54,8 +54,6 @@ python user_space/myclient.py
 
 Try to talk or shutdown the server / clients (clean shutdown integrated)
 
-Here's a nicely formatted and developer-friendly summary you can include in your GitHub project (like in a `docs/` folder or `CONTRIBUTING.md`):
-
 ---
 
 ## 🔐 GitHub Branch Rulesets
