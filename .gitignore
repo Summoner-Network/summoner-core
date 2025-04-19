@@ -3,6 +3,7 @@ vibing/
 plan.txt
 comparative.md
 *.log.[1-9]
+core/asyncagent.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
