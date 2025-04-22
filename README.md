@@ -10,15 +10,11 @@ This SDK is built to support **self-driving**, **self-organizing** economies of 
 
 ## Installation
 
+The following command will create a python environment `venv`, set environement variables in `.env` and will install rust packages (`Cargo.lock`) for the different rust-server versions implemented.
 ```sh
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+bash setup.sh
 ```
-
-## Preparation
-
-Set up `.env`:
+The file `.env` might need to be updated with specific values:
 ```sh
 # .env
 LOG_LEVEL=INFO
@@ -26,8 +22,7 @@ ENABLE_CONSOLE_LOG=true
 DATABASE_URL=postgres://user:pass@localhost:5432/mydb
 SECRET_KEY=supersecret
 ```
-
-Update or make sure `summoner/setting.py` accurately translates your setup:
+If the `.env` is updated, make sure that `summoner/setting.py` accurately translates your setup:
 ```python
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
 ENABLE_CONSOLE_LOG = os.getenv("ENABLE_CONSOLE_LOG", "true").lower() == "true"
@@ -37,10 +32,21 @@ SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
 
 ## Run server and clients
 
+<p align="center">
+<img width="500px" src="img/protocol_v1.png" />
+</p>
+
 In terminal 1:
 ```
-python user_space/myserver.py
+python user_space/myserver.py --option <rust_of_python>
 ```
+The tag `<rust_of_python>` can take either of the following values:
+  - `python`: to use a python implementation of the server based on `asyncio`;
+  - `rust_v1`: to use a preliminary rust implementation of the server based on `tokio`;
+  - `rust_v2`: to use a improved rust implementation of the server based on `tokio`;
+  - `rust_v2_1`: to use a better rust implementation of the server based on `tokio`;
+  - `rust_v2_2`: to use a better rust implementation of the server based on `tokio`;
+  - `rust_v2_3`: to use a better rust implementation of the server based on `tokio`;
 
 In terminal 2:
 ```
@@ -54,7 +60,7 @@ python user_space/myclient.py
 
 Try to talk or shutdown the server / clients (clean shutdown integrated).
 
-## 🔐 GitHub Branch Rulesets
+<!-- ## 🔐 GitHub Branch Rulesets
 
 To maintain a high-quality and secure codebase, we enforce different rulesets on our main and development branches in the `Summoner-Network/agent-sdk` repository. Please follow the policies below when contributing.
 
@@ -111,5 +117,5 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
 - Follow the required review processes per branch.
 - Address all **code scanning issues** before merging.
 
-Let us know in issues or discussions if you have questions about the rules!
+Let us know in issues or discussions if you have questions about the rules! -->
 
