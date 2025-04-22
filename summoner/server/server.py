@@ -8,6 +8,12 @@ target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__fil
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
 from logger import setup_logger
+import relay_v1 as rust1
+import relay_v2 as rust2
+import relay_v2_1 as rust2_1
+import relay_v2_2 as rust2_2
+import relay_v2_3 as rust2_3
+import relay_v2_4 as rust2_4
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -108,15 +114,59 @@ class SummonerServer:
             await asyncio.gather(*self.active_tasks, return_exceptions=True)
 
     def run(self, host='127.0.0.1', port=8888):
-        try:
-            self.set_termination_signals()
-            self.loop.run_until_complete(self.run_server(host=host, port=port))
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            pass
-        finally:
-            self.loop.run_until_complete(self.wait_for_tasks_to_finish())
-            self.loop.close()
-            self.logger.info("Server exited cleanly.")
+        
+        if self.option == "rust_v1":
+            try:
+                rust1.start_tokio_server(host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        if self.option == "rust_v2":
+            try:
+                rust2.start_tokio_server(host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        if self.option == "rust_v2_1":
+            try:
+                rust2_1.start_tokio_server(host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        if self.option == "rust_v2_2":
+            try:
+                rust2_2.start_tokio_server(host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        if self.option == "rust_v2_3":
+            try:
+                rust2_3.start_tokio_server(self.name, host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        if self.option == "rust_v2_4":
+            try:
+                rust2_3.start_tokio_server(self.name, host, port)
+            except KeyboardInterrupt:
+                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+            return
+        
+        else:
+            try:
+                self.set_termination_signals()
+                self.loop.run_until_complete(self.run_server(host=host, port=port))
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                pass
+            finally:
+                self.loop.run_until_complete(self.wait_for_tasks_to_finish())
+                self.loop.close()
+                self.logger.info("Server exited cleanly.")
 
 
 if __name__ == "__main__":
