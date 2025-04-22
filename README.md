@@ -1,5 +1,5 @@
 # Agent SDK · Summoner Platform
-## The Platform of Autonomous Economy
+
 <p align="center">
 <img width="200px" src="img/92a3447d-6925-431e-a2d0-a1ee671cd9bd.png" />
 </p>
@@ -8,62 +8,117 @@
 
 This SDK is built to support **self-driving**, **self-organizing** economies of agents, equipped with reputation-aware messaging, programmable automations, and flexible token-based rate limits.
 
-**"Winners work together!"**
+## Installation
+
+```sh
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Preparation
+
+Set up `.env`:
+```sh
+# .env
+LOG_LEVEL=INFO
+ENABLE_CONSOLE_LOG=true
+DATABASE_URL=postgres://user:pass@localhost:5432/mydb
+SECRET_KEY=supersecret
+```
+
+Update or make sure `summoner/setting.py` accurately translates your setup:
+```python
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
+ENABLE_CONSOLE_LOG = os.getenv("ENABLE_CONSOLE_LOG", "true").lower() == "true"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///local.db")
+SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
+```
+
+## Run server and clients
+
+In terminal 1:
+```
+python user_space/myserver.py
+```
+
+In terminal 2:
+```
+python user_space/myclient.py
+```
+
+In terminal 3:
+```
+python user_space/myclient.py
+```
+
+Try to talk or shutdown the server / clients (clean shutdown integrated)
+
+Here's a nicely formatted and developer-friendly summary you can include in your GitHub project (like in a `docs/` folder or `CONTRIBUTING.md`):
 
 ---
 
-## ✨ Key Features
+## 🔐 GitHub Branch Rulesets
 
-- **Agent-Centric Design**  
-  Build agents that interact, transact, and coordinate on your behalf. Agents act as autonomous participants in the Summoner network.
-
-- **Smart Contract Integration**  
-  Contracts written in Rust and compiled to WebAssembly power agent logic and interactions.
-
-- **CAST Token-Based Rate Limiting**  
-  By default, the SDK respects **CAST tokens** on the **Arbitrum One** network to determine per-client rate limits. Custom ERC20 tokens may also be configured for alternative economic incentive models.
-
-- **Self-Driving Automations**  
-  Summoner supports two forms of programmable automation:
-  - **Tickers:** Periodic transactions automatically executed on a schedule.
-  - **Embeds:** Triggerable transactions embedded within a contract, fired in response to external events or other transactions.
-
-- **Reputation and Message History**  
-  Agents build **reputation scores** with each other through ongoing interaction. All messages are signed by token incentive holders and stored in a message buffer to maintain on-chain memory of communication and interaction history.
+To maintain a high-quality and secure codebase, we enforce different rulesets on our main and development branches in the `Summoner-Network/agent-sdk` repository. Please follow the policies below when contributing.
 
 ---
 
-## 🧠 Building Trust Over Time
+### 🚩 `ruleset-main` (Default Branch)
 
-Summoner treats agent communication as **on-the-record**. Every message exchanged between agents is cryptographically signed and recorded, creating a durable and replayable memory of past behavior.
+> **Target**: Default branch (`main`)  
+> **Status**: ✅ Active  
+> **Purpose**: Protect the integrity of production-ready code
 
-> Trust emerges naturally through persistent messaging, transparent signing, and observable incentives.
-
-This system enables **minimum network awareness** of agent quality — even before a first interaction — and supports robust coordination between autonomous entities.
-
----
-
-## 🌐 Network Architecture
-
-Summoner can be thought of as a **massive network of autonomous agents** performing high-frequency, high-confidence coordination. Humans remain at the perimeter, interacting with surface interfaces, while agents operate and automate beneath the surface.
-
-The Agent SDK is the entrypoint to that world.
-
----
-
-## ⚙️ Getting Started
-
-To start building your own Summoner agents:
-
-1. Clone this repository.
-2. Install dependencies.
-3. Connect to Arbitrum One (or configure a custom ERC20 token).
-4. Begin writing and deploying smart contracts using Tickers and Embeds.
+#### ✅ Enforced Rules:
+- **🔒 No branch deletion**
+- **🚫 No non-fast-forward pushes**
+- **📥 Pull Requests Only**
+  - Minimum **2 approving reviews**
+  - **Code owner** review required
+  - **Approval required** on the **last push**
+  - **Dismiss stale reviews** on new commits
+  - **All review threads must be resolved**
+  - **Allowed merge methods**: Merge, Squash, Rebase
+- **🛡️ Code Scanning (Security)**
+  - Tool: `CodeQL`
+  - Thresholds: 
+    - Security Alerts: `high_or_higher`
+    - General Alerts: `errors`
+- **✅ Allow branch creation and updates**
 
 ---
 
-## 📜 License
+### 🧪 `ruleset-dev` (Development Branch)
 
-MIT © [Summoner Project](https://summoner.to)
+> **Target**: `refs/heads/dev`  
+> **Status**: ✅ Active  
+> **Purpose**: Ensure quality during ongoing development
+
+#### ✅ Enforced Rules:
+- **🔒 No branch deletion**
+- **🚫 No non-fast-forward pushes**
+- **📥 Pull Requests Only**
+  - Minimum **1 approving review**
+  - **Approval required** on the **last push**
+  - **All review threads must be resolved**
+  - **Allowed merge methods**: Merge, Squash, Rebase
+- **🛡️ Code Scanning (Security)**
+  - Tool: `CodeQL`
+  - Thresholds: 
+    - Security Alerts: `high_or_higher`
+    - General Alerts: `errors`
 
 ---
+
+### 📌 Note for Contributors
+
+- Always use **Pull Requests** for changes—**no direct pushes** to `main` or `dev`.
+- Follow the required review processes per branch.
+- Address all **code scanning issues** before merging.
+
+Let us know in issues or discussions if you have questions about the rules!
+
+---
+
+Would you like this written into a `README`, `CONTRIBUTING.md`, or a separate `rulesets.md` file?
