@@ -52,11 +52,7 @@ In terminal 3:
 python user_space/myclient.py
 ```
 
-Try to talk or shutdown the server / clients (clean shutdown integrated)
-
-Here's a nicely formatted and developer-friendly summary you can include in your GitHub project (like in a `docs/` folder or `CONTRIBUTING.md`):
-
----
+Try to talk or shutdown the server / clients (clean shutdown integrated).
 
 ## 🔐 GitHub Branch Rulesets
 
@@ -67,10 +63,9 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
 ### 🚩 `ruleset-main` (Default Branch)
 
 > **Target**: Default branch (`main`)  
-> **Status**: ✅ Active  
 > **Purpose**: Protect the integrity of production-ready code
 
-#### ✅ Enforced Rules:
+#### Enforced Rules:
 - **🔒 No branch deletion**
 - **🚫 No non-fast-forward pushes**
 - **📥 Pull Requests Only**
@@ -85,17 +80,16 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
   - Thresholds: 
     - Security Alerts: `high_or_higher`
     - General Alerts: `errors`
-- **✅ Allow branch creation and updates**
+- **🔒 No direct pushes or branch creation allowed without bypass.**
 
 ---
 
 ### 🧪 `ruleset-dev` (Development Branch)
 
 > **Target**: `refs/heads/dev`  
-> **Status**: ✅ Active  
 > **Purpose**: Ensure quality during ongoing development
 
-#### ✅ Enforced Rules:
+#### Enforced Rules:
 - **🔒 No branch deletion**
 - **🚫 No non-fast-forward pushes**
 - **📥 Pull Requests Only**
@@ -119,6 +113,3 @@ To maintain a high-quality and secure codebase, we enforce different rulesets on
 
 Let us know in issues or discussions if you have questions about the rules!
 
----
-
-Would you like this written into a `README`, `CONTRIBUTING.md`, or a separate `rulesets.md` file?

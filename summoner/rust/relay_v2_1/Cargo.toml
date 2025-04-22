@@ -1,0 +1,18 @@
+[package]
+name = "relay_v2_1"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "relay_v2_1"         # <- This defines the Python module name
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+tokio = { version = "1.37", features = ["full"] }
+log = "0.4"
+chrono = "0.4"
+fern = { version = "0.6", features = ["colored"] } 
+
+
+

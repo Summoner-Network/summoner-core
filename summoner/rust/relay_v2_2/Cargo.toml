@@ -1,0 +1,20 @@
+[package]
+name = "relay_v2_2"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "relay_v2_2"         # ✅ This becomes `import relay_v2_2` in Python
+crate-type = ["cdylib"]     # ✅ Required for Python FFI compatibility via PyO3
+
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }  # ✅ Required for Python binding
+tokio = { version = "1.37", features = ["full"] }             # ✅ Async IO runtime
+log = "0.4"                                                   # ✅ Used by fern
+chrono = "0.4"                                                # ✅ Timestamps in logs
+fern = { version = "0.6", features = ["colored"] }            # ✅ Pretty logger + file support
+
+
+
+
