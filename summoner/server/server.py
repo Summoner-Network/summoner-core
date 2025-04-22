@@ -13,7 +13,6 @@ import relay_v2 as rust2
 import relay_v2_1 as rust2_1
 import relay_v2_2 as rust2_2
 import relay_v2_3 as rust2_3
-import relay_v2_4 as rust2_4
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -144,13 +143,6 @@ class SummonerServer:
             return
         
         if self.option == "rust_v2_3":
-            try:
-                rust2_3.start_tokio_server(self.name, host, port)
-            except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
-            return
-        
-        if self.option == "rust_v2_4":
             try:
                 rust2_3.start_tokio_server(self.name, host, port)
             except KeyboardInterrupt:

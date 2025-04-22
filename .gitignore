@@ -2,6 +2,10 @@ trash/
 vibing/
 plan.txt
 comparative.md
+*.log.[1-9]
+.DS_Store
+relay_v3/
+relay_v4/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
