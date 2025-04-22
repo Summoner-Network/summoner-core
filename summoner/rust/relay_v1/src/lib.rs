@@ -1,4 +1,4 @@
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyModule, Bound};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use std::sync::Arc;
@@ -93,7 +93,7 @@ async fn handle_client(stream: TcpStream, clients: Arc<Mutex<Vec<Arc<Mutex<Write
 
 /// Expose the module to Python
 #[pymodule]
-fn relay_v1(_py: Python, m: &PyModule) -> PyResult<()> {
+fn relay_v1(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(start_tokio_server, m)?)?;
     Ok(())
 }

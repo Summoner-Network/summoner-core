@@ -9,7 +9,7 @@ crate-type = ["cdylib"]     # ✅ Required for Python FFI compatibility via PyO3
 
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }  # ✅ Required for Python binding
+pyo3 = { version = "0.24.1", features = ["extension-module"] }  # ✅ Required for Python binding
 tokio = { version = "1.37", features = ["full"] }             # ✅ Async IO runtime
 log = "0.4"                                                   # ✅ Used by fern
 chrono = "0.4"                                                # ✅ Timestamps in logs

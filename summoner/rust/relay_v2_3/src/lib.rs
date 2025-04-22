@@ -1,4 +1,4 @@
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyModule, Bound};
 
 mod logger;
 mod server;
@@ -21,7 +21,7 @@ pub fn start_tokio_server(_py: Python, name: String, host: String, port: u16) ->
 }
 
 #[pymodule]
-fn relay_v2_3(_py: Python, m: &PyModule) -> PyResult<()> {
+fn relay_v2_3(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(start_tokio_server, m)?)?;
     Ok(())
 }

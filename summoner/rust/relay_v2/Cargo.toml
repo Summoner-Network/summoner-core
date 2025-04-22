@@ -9,5 +9,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 tokio = { version = "1.37", features = ["full"] }
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.24.1", features = ["extension-module"] }
 
