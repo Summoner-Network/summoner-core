@@ -409,7 +409,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relay_v2_2"
+name = "rust_server_sdk"
 version = "0.1.0"
 dependencies = [
  "chrono",

@@ -2,44 +2,42 @@
 
 set -e  # Exit on error
 
-# --- Parse arguments ---
-VERSION=""
-while getopts "v:" opt; do
-  case ${opt} in
-    v )
-      VERSION=$OPTARG
-      ;;
-    \? )
-      echo "Usage: $0 -v <version_number>"
-      exit 1
-      ;;
-  esac
-done
-
-if [ -z "$VERSION" ]; then
-  echo "❌ Error: You must specify a version with -v"
-  echo "Usage: $0 -v 1"
-  exit 1
-fi
+# --- Parse optional argument ---
+PREFIX_FILTER="$1"  # e.g., "relay_v" or empty for all
 
 # --- Resolve paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RELAY_DIR="$SCRIPT_DIR/summoner/rust/relay_v$VERSION"
+RUST_DIR="$SCRIPT_DIR/summoner/rust"
 
-# --- Check if directory exists ---
-if [ ! -d "$RELAY_DIR" ]; then
-  echo "❌ relay_v$VERSION does not exist at $RELAY_DIR"
+# --- Validate directory ---
+if [ ! -d "$RUST_DIR" ]; then
+  echo "❌ Directory not found: $RUST_DIR"
   exit 1
 fi
 
-echo "🔄 Reinstalling relay_v$VERSION from $RELAY_DIR..."
+# --- Process matching subdirectories with Cargo.toml ---
+FOUND=0
+for DIR in "$RUST_DIR"/*/; do
+  BASENAME="$(basename "$DIR")"
+  if [[ -n "$PREFIX_FILTER" && "$BASENAME" != $PREFIX_FILTER* ]]; then
+    continue
+  fi
 
-# --- Clean and reinstall ---
-cd "$RELAY_DIR"
-echo "🧼 Running cargo clean..."
-cargo clean
+  if [ -f "$DIR/Cargo.toml" ]; then
+    FOUND=1
+    echo "🔄 Reinstalling crate in: $DIR"
 
-echo "🔨 Rebuilding with maturin develop --release..."
-maturin develop --release
+    cd "$DIR"
+    echo "🧼 Running cargo clean..."
+    cargo clean
 
-echo "✅ relay_v$VERSION reinstalled and ready to use!"
+    echo "🔨 Rebuilding with maturin develop --release..."
+    maturin develop --release
+
+    echo "✅ Reinstalled crate in $DIR"
+  fi
+done
+
+if [ $FOUND -eq 0 ]; then
+  echo "⚠️ No matching folders with Cargo.toml found in $RUST_DIR"
+fi

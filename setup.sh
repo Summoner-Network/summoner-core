@@ -21,11 +21,8 @@ SECRET_KEY=supersecret
 EOF
 
 # Run reinstall scripts
-bash reinstall_rust_server.sh -v 1
-bash reinstall_rust_server.sh -v 2
-bash reinstall_rust_server.sh -v 2_1
-bash reinstall_rust_server.sh -v 2_2
-bash reinstall_rust_server.sh -v 2_3
+bash reinstall_rust_server.sh rust_server_sdk
+
 
 echo "Setup complete. Environment initialized, dependencies installed, and Rust servers reinstalled."
 

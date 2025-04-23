@@ -4,15 +4,15 @@ import os
 import sys
 from typing import Optional
 
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
+# Setup path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Imports
 from logger import setup_logger
-import relay_v1 as rust1
-import relay_v2 as rust2
-import relay_v2_1 as rust2_1
-import relay_v2_2 as rust2_2
-import relay_v2_3 as rust2_3
+import rust_server_sdk as rss
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -26,7 +26,9 @@ class SummonerServer:
         "logger",
         "loop",
         "clients",
+        "clients_lock",
         "active_tasks",
+        "tasks_lock",
     )
 
     def __init__(self, name: Optional[str] = None, option: Optional[str] = None):
@@ -44,7 +46,10 @@ class SummonerServer:
         asyncio.set_event_loop(self.loop)
 
         self.clients: set[asyncio.streams.StreamWriter] = set()
-        self.active_tasks: set[asyncio.Task] = set()
+        self.clients_lock = asyncio.Lock()
+
+        self.active_tasks: dict[asyncio.Task, str] = {}
+        self.tasks_lock = asyncio.Lock()
     
     async def handle_client(
         self,
@@ -53,9 +58,13 @@ class SummonerServer:
         ):
         addr = writer.get_extra_info("peername")
         self.logger.info(f"{addr} connected.")
-        self.clients.add(writer)
+
         task = asyncio.current_task()
-        self.active_tasks.add(task)
+        async with self.clients_lock:
+            self.clients.add(writer)
+
+        async with self.tasks_lock:
+            self.active_tasks[task] = str(addr)
 
         try:
             while True:
@@ -64,7 +73,13 @@ class SummonerServer:
                     raise ClientDisconnected("Client closed the connection.")
                 message = data.decode()
                 self.logger.info(f"Received from {addr}: {message.strip()}")
-                for other_writer in self.clients:
+
+                # Create a snapshot of current clients to allow safe iteration
+                async with self.clients_lock:
+                    clients_snapshot = list(self.clients)
+
+                # Iterate over the snapshot to avoid concurrency issues without long-held locks
+                for other_writer in clients_snapshot:
                     if other_writer != writer:
                         other_writer.write(f"[{addr}] {message}".encode())
                         await other_writer.drain()
@@ -80,15 +95,18 @@ class SummonerServer:
             try:
                 writer.write("Warning: Server disconnected.".encode())
                 await writer.drain()
-            
             except Exception:
                 pass
             
-            self.clients.remove(writer)
+            async with self.clients_lock:
+                self.clients.discard(writer)
             writer.close()
             await writer.wait_closed()
+
+            async with self.tasks_lock:
+                self.active_tasks.pop(task, None)
+
             self.logger.info(f"{addr} connection closed.")
-            self.active_tasks.discard(task)
 
     def shutdown(self):
         self.logger.info("Server is shutting down...")
@@ -103,48 +121,25 @@ class SummonerServer:
 
     async def run_server(self, host: str = '127.0.0.1', port: int = 8888):
         server = await asyncio.start_server(self.handle_client, host=host, port=port)
-        self.logger.info(f"Server started on port {port}.")
+        self.logger.info(f"Python server listening on {host}:{port}.")
         async with server:
             await server.serve_forever()
 
     async def wait_for_tasks_to_finish(self):
         # Wait for all client handlers to finish
-        if self.active_tasks:
-            await asyncio.gather(*self.active_tasks, return_exceptions=True)
+        async with self.tasks_lock:
+            tasks = list(self.active_tasks)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def run(self, host='127.0.0.1', port=8888):
-        
-        if self.option == "rust_v1":
+        rust_dispatch = {
+            "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
+        }
+
+        if self.option in rust_dispatch:
             try:
-                rust1.start_tokio_server(host, port)
-            except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
-            return
-        
-        if self.option == "rust_v2":
-            try:
-                rust2.start_tokio_server(host, port)
-            except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
-            return
-        
-        if self.option == "rust_v2_1":
-            try:
-                rust2_1.start_tokio_server(host, port)
-            except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
-            return
-        
-        if self.option == "rust_v2_2":
-            try:
-                rust2_2.start_tokio_server(host, port)
-            except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
-            return
-        
-        if self.option == "rust_v2_3":
-            try:
-                rust2_3.start_tokio_server(self.name, host, port)
+                rust_dispatch[self.option](host, port)
             except KeyboardInterrupt:
                 self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
             return

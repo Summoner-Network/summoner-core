@@ -1,10 +1,10 @@
 [package]
-name = "relay_v2_3"
+name = "rust_server_sdk"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "relay_v2_3"         # ✅ This becomes `import relay_v2_3` in Python
+name = "rust_server_sdk"         # ✅ This becomes `import rust_server_sdk` in Python
 crate-type = ["cdylib"]     # ✅ Required for Python FFI compatibility via PyO3
 
 
