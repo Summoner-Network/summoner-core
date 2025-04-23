@@ -10,7 +10,7 @@ This SDK is built to support **self-driving**, **self-organizing** economies of 
 
 ## Docs
 
-- [contribute_to_server](doc/doc_contribute_to_server.md) 
-- [development](doc/doc_development.md) 
-- [installation](doc/doc_installation.md) 
-- [make_an_agent](doc/doc_make_an_agent.md)
+- [contribute_to_server](docs/doc_contribute_to_server.md) 
+- [development](docs/doc_development.md) 
+- [installation](docs/doc_installation.md) 
+- [make_an_agent](docs/doc_make_an_agent.md)
