@@ -6,7 +6,7 @@
 ## Run server and clients
 
 <p align="center">
-<img width="500px" src="img/protocol_v1.png" />
+<img width="500px" src="../img/protocol_v1.png" />
 </p>
 
 In terminal 1:
