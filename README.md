@@ -13,7 +13,6 @@ This SDK is built to support **self-driving**, **self-organizing** economies of 
 Click any of the links below to access detailed documentation for different parts of the project. Each document contains focused guidance depending on what you want to work on or learn about.
 
 - ✅ **[Installation Guide](docs/doc_installation.md)**  
-  *(Ready to Use)*  
   Learn how to set up your environment, install Python and Rust, configure `.env` variables, and run the `setup.sh` script to prepare your system for development.
 
 - ✅ **[Contributing to the Rust Server Codebase](docs/doc_contribute_to_server.md)**  
