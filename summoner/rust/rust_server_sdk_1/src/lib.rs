@@ -69,7 +69,7 @@ pub fn start_tokio_server(
 }
 
 /// This macro registers the module as a Python extension:
-/// - It exposes the `start_tokio_server` function under the name `relay_v3`
+/// - It exposes the `start_tokio_server` function under the name `rust_server_sdk_1`
 #[pymodule]
 fn rust_server_sdk_1(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register the `start_tokio_server` function in the Python module
