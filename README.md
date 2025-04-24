@@ -19,9 +19,9 @@ Click any of the links below to access detailed documentation for different part
   *(Under Construction)*  
   This document will describe overall development practices, coding standards, and branching strategies used in the repository.
 
-- 🚧 **[Installation Guide](docs/doc_installation.md)**  
-  *(Under Construction)*  
-  This will provide instructions for setting up your environment, installing dependencies, and preparing your system to run the platform.
+- ✅ **[Installation Guide](docs/doc_installation.md)**  
+  *(Ready to Use)*  
+  Learn how to set up your environment, install Python and Rust, configure `.env` variables, and run the `setup.sh` script to prepare your system for development.
 
 - 🚧 **[Creating an Agent](docs/doc_make_an_agent.md)**  
   *(Under Construction)*  
