@@ -24,7 +24,6 @@ These Rust modules are exposed to Python via [PyO3](https://pyo3.rs/), allowing 
 ```bash
 summoner
 ├── client             # Agent SDK (Python)
-├── core
 ├── protocol
 ├── rust               # Rust server implementations
 │   ├── rust_server_sdk
