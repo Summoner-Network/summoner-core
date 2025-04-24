@@ -78,7 +78,7 @@ This will:
 - Create a `.env` file
 - Install all active Rust server implementations
 
-More details are available in [doc_installation.md](doc_installation.md).
+More details are available in [Setup & Installation](doc_installation.md).
 
 ---
 
