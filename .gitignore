@@ -1,11 +1,8 @@
 # Remy's
 trash/
-vibing/
 experiments/
 .DS_Store
 *.log.[1-9]
-plan.txt
-comparative.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

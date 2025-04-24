@@ -47,6 +47,7 @@ pub async fn run_server(host: String, port: u16, logger: Logger) -> Result<(), B
     // Begin accepting and handling client connections
     accept_connections(listener, clients, shutdown_tx, shutdown_rx, logger).await;
 
+    // Return success
     Ok(())
 }
 

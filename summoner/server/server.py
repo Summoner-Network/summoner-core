@@ -13,6 +13,7 @@ if project_root not in sys.path:
 # Imports
 from logger import setup_logger
 import rust_server_sdk as rss
+import rust_server_sdk_1 as rss_1
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -135,13 +136,14 @@ class SummonerServer:
     def run(self, host='127.0.0.1', port=8888):
         rust_dispatch = {
             "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
+            "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None)
         }
 
         if self.option in rust_dispatch:
             try:
                 rust_dispatch[self.option](host, port)
             except KeyboardInterrupt:
-                self.logger.warning("Rust server received KeyboardInterrupt. Exiting cleanly.")
+                pass
             return
         
         else:

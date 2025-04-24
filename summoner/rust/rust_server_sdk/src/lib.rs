@@ -1,11 +1,13 @@
 // Import PyO3 to expose Rust code to Python
 use pyo3::{prelude::*, types::PyModule, Bound};
 
-// Declare internal modules: logger (for logging) and server (main server logic)
-mod logger;
+// Declare modules from this crate:
+// - `logger` is public to the entire crate
+// - `server` is private to lib.rs
+pub mod logger;
 mod server;
 
-// Import helper functions from the modules
+// Import public items from logger and server modules
 use logger::get_logger;
 use server::run_server;
 
