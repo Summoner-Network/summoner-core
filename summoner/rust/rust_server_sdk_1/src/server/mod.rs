@@ -88,14 +88,12 @@ pub async fn run_server(config: ServerConfig, logger: Logger) -> Result<(), Box<
     // Set up a channel for backpressure monitoring with proper buffer size
     let (backpressure_tx, backpressure_rx) = mpsc::channel::<(SocketAddr, usize)>(config.connection_buffer_size);
 
-    // Spawn a task to listen for Ctrl+C (SIGINT) and trigger shutdown
+    // Spawn a background task to listen for Ctrl+C (SIGINT) and trigger shutdown
     spawn_shutdown_listener(shutdown_tx.clone(), logger.clone());
 
-    // Spawn a task to monitor backpressure
-    // We use let _ to intentionally ignore the returned JoinHandle
-    // And we don't need to await this background task as it runs for the server's lifetime
-    let _ = spawn_backpressure_monitor(backpressure_tx.clone(), backpressure_rx, logger.clone());
-
+    // Spawn a background task to monitor backpressure
+    // TODO: might need to include clients for disconnection or throttlling
+    spawn_backpressure_monitor(backpressure_tx.clone(), backpressure_rx, logger.clone());
 
     // Begin accepting and handling client connections
     accept_connections(listener, clients, shutdown_tx, shutdown_rx, backpressure_tx, config, logger).await;
@@ -105,7 +103,7 @@ pub async fn run_server(config: ServerConfig, logger: Logger) -> Result<(), Box<
 }
 
 /// Spawn a task to monitor backpressure from clients
-async fn spawn_backpressure_monitor(
+fn spawn_backpressure_monitor(
     _tx: mpsc::Sender<(SocketAddr, usize)>,
     mut rx: mpsc::Receiver<(SocketAddr, usize)>,
     logger: Logger,
@@ -120,7 +118,12 @@ async fn spawn_backpressure_monitor(
             // Log if queue size is getting large
             if queue_size > 100 {
                 logger.warn(&format!("⚠️ High backpressure from client {}: {} messages queued", addr, queue_size));
-                
+            
+                if queue_size > 500 {
+                    logger.warn(&format!("🚨 Disconnecting {} due to extreme backpressure", addr));
+                    // TODO: Force disconnect the client from the client list here
+                }
+
                 // Here you could implement more sophisticated backpressure handling
                 // such as throttling certain clients or implementing flow control
             }

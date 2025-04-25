@@ -137,7 +137,7 @@ To begin development on a new Rust server implementation:
        rust_dispatch = {
            "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
            "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None),
-           "my_new_rust_patch": lambda h, p: awesome_rust_server.start_tokio_server(self.name, h, p),
+           "my_new_rust_patch": lambda h, p: awesome_rust_server.start_tokio_server(self.name, h, p, None, None, None),
        }
    ```
 

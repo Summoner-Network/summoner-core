@@ -1,6 +1,3 @@
-// Import color configuration for pretty terminal output using fern
-use fern::colors::{Color, ColoredLevelConfig};
-
 // Import local time formatting tools from chrono
 use chrono::Local;
 
@@ -46,14 +43,6 @@ pub fn get_logger(name: &str) -> Logger {
 
     // Initialize the logger if it hasn't been initialized yet
     LOGGER.get_or_init(|| {
-        // Configure custom colors per log level (only used for console)
-        let _colors = ColoredLevelConfig::new()
-            .info(Color::Green)
-            .warn(Color::Yellow)
-            .error(Color::Red)
-            .debug(Color::Blue)
-            .trace(Color::Magenta);
-
         // Sanitize the logger name to use in the log filename
         let safe_name = name.replace('.', "_");
         let file_name = format!("{}.log", safe_name);
