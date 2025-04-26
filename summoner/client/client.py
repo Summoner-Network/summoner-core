@@ -100,7 +100,6 @@ class SummonerClient:
                 async with self.routes_lock:
                     senders = list(self.sending_functions.values())
                 payloads = await asyncio.gather(*(fn() for fn in senders))
-                print(payloads)
                 for payload in payloads:
                     if isinstance(payload, str) and payload == "/quit":
                         stop_event.set()

@@ -3,6 +3,7 @@ trash/
 experiments/
 .DS_Store
 *.log.[1-9]
+*.mov
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
