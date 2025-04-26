@@ -31,6 +31,27 @@ pub type Client = Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>;
 // Define a type alias for the shared list of all clients
 pub type ClientList = Arc<Mutex<Vec<Client>>>;
 
+// Import JSON macro and serialization utilities
+use serde_json::json;
+
+// Import `Cow` (Clone-on-Write) for efficient return types that can be either borrowed or owned
+use std::borrow::Cow;
+
+/// Removes the last `\n` if it exists. Returns a string slice without allocation.
+fn remove_last_newline(s: &str) -> &str {
+    s.strip_suffix('\n').unwrap_or(s)
+}
+
+/// Ensure the string ends with a single newline character (`\n`)
+/// Returns a `Cow<str>` to avoid allocation when the original string is already correct
+fn ensure_trailing_newline(s: &str) -> Cow<str> {
+    if s.ends_with('\n') {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(format!("{s}\n"))
+    }
+}
+
 /// This struct tracks client message rate for rate limiting
 struct RateLimiter {
     /// Messages sent in the current window
@@ -310,16 +331,22 @@ async fn handle_client_messages(
                         }
                         
                         // Log the message with its source address
-                        logger.info(&format!("📨 From {}: {}", addr, line.trim()));
+                        logger.info(&format!("📨 From {}: {}", addr, remove_last_newline(&line)));
+
+                        // Build a JSON object with address and cleaned content, then serialize it to a string
+                        let payload = json!({
+                                "addr": addr,
+                                "content": remove_last_newline(&line)
+                            }).to_string();
                         
                         // Format the message with sender's address prefix
-                        let msg = format!("[{}] {}\n", addr, line.trim());
+                        // let msg = format!("\{\"addr\": {}, \"content\": {}\}\n", addr, remove_last_newline(&line));
                         
                         // Track the message queue size
                         let queue_tx = queue_tx.clone();
                         
                         // Broadcast message to all clients
-                        broadcast_message(clients, sender, addr, &msg, queue_tx, logger).await;
+                        broadcast_message(clients, sender, addr, &payload, queue_tx, logger).await;
                     }
                     
                     // The client closed the connection cleanly
@@ -405,7 +432,7 @@ async fn broadcast_message(
         
         // Lock each client's writer and send the message
         let mut w = client.lock().await;
-        if let Err(e) = w.write_all(msg.as_bytes()).await {
+        if let Err(e) = w.write_all(ensure_trailing_newline(&msg).as_bytes()).await {
             logger.warn(&format!("❌ Failed to send to client: {}", e));
         }
     }

@@ -2,6 +2,7 @@ import asyncio
 import signal
 import os
 import sys
+import json
 from typing import Optional
 
 # Setup path
@@ -11,6 +12,10 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Imports
+from utils import (
+    remove_last_newline, 
+    ensure_trailing_newline,
+    )
 from logger import setup_logger
 import rust_server_sdk as rss
 import rust_server_sdk_1 as rss_1
@@ -73,7 +78,7 @@ class SummonerServer:
                 if not data:
                     raise ClientDisconnected("Client closed the connection.")
                 message = data.decode()
-                self.logger.info(f"Received from {addr}: {message.strip()}")
+                self.logger.info(f"Received from {addr}: {remove_last_newline(message)}")
 
                 # Create a snapshot of current clients to allow safe iteration
                 async with self.clients_lock:
@@ -82,7 +87,8 @@ class SummonerServer:
                 # Iterate over the snapshot to avoid concurrency issues without long-held locks
                 for other_writer in clients_snapshot:
                     if other_writer != writer:
-                        other_writer.write(f"[{addr}] {message}".encode())
+                        payload = json.dumps({'addr': addr, 'content': remove_last_newline(message)})
+                        other_writer.write(ensure_trailing_newline(payload).encode())
                         await other_writer.drain()
         
         except ClientDisconnected:
@@ -156,9 +162,3 @@ class SummonerServer:
                 self.loop.run_until_complete(self.wait_for_tasks_to_finish())
                 self.loop.close()
                 self.logger.info("Server exited cleanly.")
-
-
-if __name__ == "__main__":
-    
-    myserver = SummonerServer(name="MyServer", option = "python")
-    myserver.run(host = "127.0.0.1", port = 8888)

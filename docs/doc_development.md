@@ -1,60 +1,57 @@
+# 🔐 GitHub Branch Rulesets
 
-## 🔐 GitHub Branch Rulesets
+To maintain a secure, reliable, and high-quality codebase, the `Summoner-Network/agent-sdk` repository enforces branch protection rules on both the `main` and `dev` branches.  
+Please review the following guidelines carefully before contributing.
 
-To maintain a high-quality and secure codebase, we enforce different rulesets on our main and development branches in the `Summoner-Network/agent-sdk` repository. Please follow the policies below when contributing.
+## 🚩 `ruleset-main` (Default Branch)
 
----
+> **Branch**: `main`  
+> **Purpose**: Protect the integrity of production-ready code.
 
-### 🚩 `ruleset-main` (Default Branch)
+The `main` branch is reserved for stable and validated updates. Changes must pass through a strict review and security process.
 
-> **Target**: Default branch (`main`)  
-> **Purpose**: Protect the integrity of production-ready code
+### Enforced Rules:
+- **🔒 No branch deletion** — The `main` branch cannot be deleted.
+- **🚫 No non-fast-forward pushes** — History must remain linear and auditable.
+- **📥 Pull Requests Only** — Direct pushes are not allowed.  
+  Each pull request must:
+  - Receive at least **2 approving reviews**.
+  - Include a **code owner** review.
+  - Receive approval **on the latest push**.
+  - Resolve **all review threads** before merging.
+  - Allow **merge**, **squash**, or **rebase** methods.
+- **🛡️ Code Scanning (Security)** — Automated security scanning with `CodeQL` is enforced:
+  - **Security alerts** must be resolved at `high` severity or higher.
+  - **General alerts** must be resolved if classified as `errors`.
+- **🔒 No direct pushes or branch creation** — Only through approved pull requests or admin bypass.
 
-#### Enforced Rules:
-- **🔒 No branch deletion**
-- **🚫 No non-fast-forward pushes**
-- **📥 Pull Requests Only**
-  - Minimum **2 approving reviews**
-  - **Code owner** review required
-  - **Approval required** on the **last push**
-  - **Dismiss stale reviews** on new commits
-  - **All review threads must be resolved**
-  - **Allowed merge methods**: Merge, Squash, Rebase
-- **🛡️ Code Scanning (Security)**
-  - Tool: `CodeQL`
-  - Thresholds: 
-    - Security Alerts: `high_or_higher`
-    - General Alerts: `errors`
-- **🔒 No direct pushes or branch creation allowed without bypass.**
 
----
+## 🧪 `ruleset-dev` (Development Branch)
 
-### 🧪 `ruleset-dev` (Development Branch)
+> **Branch**: `dev`  
+> **Purpose**: Maintain quality during active development.
 
-> **Target**: `refs/heads/dev`  
-> **Purpose**: Ensure quality during ongoing development
+The `dev` branch supports ongoing feature work while ensuring a minimum level of code review and security compliance.
 
-#### Enforced Rules:
-- **🔒 No branch deletion**
-- **🚫 No non-fast-forward pushes**
-- **📥 Pull Requests Only**
-  - Minimum **1 approving review**
-  - **Approval required** on the **last push**
-  - **All review threads must be resolved**
-  - **Allowed merge methods**: Merge, Squash, Rebase
-- **🛡️ Code Scanning (Security)**
-  - Tool: `CodeQL`
-  - Thresholds: 
-    - Security Alerts: `high_or_higher`
-    - General Alerts: `errors`
+### Enforced Rules:
+- **🔒 No branch deletion** — The `dev` branch cannot be deleted.
+- **🚫 No non-fast-forward pushes** — Linear history must be maintained.
+- **📥 Pull Requests Only** — Direct pushes are not allowed.  
+  Each pull request must:
+  - Receive at least **1 approving review**.
+  - Receive approval **on the latest push**.
+  - Resolve **all review threads** before merging.
+  - Allow **merge**, **squash**, or **rebase** methods.
+- **🛡️ Code Scanning (Security)** — CodeQL scanning is also enforced:
+  - **Security alerts** must be resolved at `high` severity or higher.
+  - **General alerts** must be resolved if classified as `errors`.
 
----
+## 📌 Important Notes for All Contributors
 
-### 📌 Note for Contributors
+- Always open a **pull request** when proposing changes.  
+  **Direct pushes** to `main` or `dev` are not permitted.
+- Ensure that your changes pass the **required number of reviews** based on the branch.
+- Resolve any **CodeQL alerts** before merging.
+- If you encounter any questions about these rules, please open an issue or start a discussion.
 
-- Always use **Pull Requests** for changes—**no direct pushes** to `main` or `dev`.
-- Follow the required review processes per branch.
-- Address all **code scanning issues** before merging.
-
-Let us know in issues or discussions if you have questions about the rules!
-
+Following these policies helps keep our codebase clean, secure, and collaborative!

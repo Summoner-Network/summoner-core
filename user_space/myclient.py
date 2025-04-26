@@ -11,11 +11,10 @@ if __name__ == "__main__":
     myagent = SummonerClient(name="MyAgent", option = "python")
 
     @myagent.receive(route="custom_receive")
-    async def custom_receive_v1(message):
-        if message[:len("Warning:")] == "Warning:":
-            print("\r[From server]", message.strip(), flush=True)
-        else:
-            print("\r[Received]", message.strip(), flush=True)
+    async def custom_receive_v1(msg):
+        msg = (msg["content"] if isinstance(msg, dict) else msg) 
+        tag = ("\r[From server]" if msg[:len("Warning:")] == "Warning:" else "\r[Received]")
+        print(tag, msg, flush=True)
         print("r> ", end="", flush=True)
 
     @myagent.send(route="custom_send")

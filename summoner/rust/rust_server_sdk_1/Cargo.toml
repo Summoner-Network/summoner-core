@@ -14,6 +14,8 @@ tokio = { version = "1.37", features = ["full"] }             # ✅ Async IO run
 log = "0.4"                                                   # ✅ Used by fern
 chrono = "0.4"                                                # ✅ Timestamps in logs
 fern = { version = "0.6", features = ["colored"] }            # ✅ Pretty logger + file support
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 
 

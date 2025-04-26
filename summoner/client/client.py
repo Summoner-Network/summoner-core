@@ -2,7 +2,8 @@ import asyncio
 import signal
 import os
 import sys
-from typing import Optional, Callable
+import json
+from typing import Optional, Callable, Union
 from aioconsole import ainput
 import inspect
 
@@ -13,7 +14,12 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Imports
+from utils import (
+    remove_last_newline,
+    ensure_trailing_newline,
+)
 from logger import setup_logger
+
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
@@ -53,7 +59,7 @@ class SummonerClient:
         self.connection_lock = asyncio.Lock()  # Protect host/port updates
 
     def receive(self, route: str):
-        def decorator(fn: Callable[[str], None]):
+        def decorator(fn: Callable[[Union[str, dict]], None]):
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"Function for route '{route}' must be async")
             
@@ -77,7 +83,7 @@ class SummonerClient:
             # Protect route registration
             async def register():
                 async with self.routes_lock:
-                    if route in self.receiving_functions:
+                    if route in self.sending_functions:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
                     self.sending_functions[route] = fn
                     # self.sending_functions.setdefault(route, fn)
@@ -97,7 +103,7 @@ class SummonerClient:
                     if message == "/quit":
                         stop_event.set()
                         break
-                    writer.write((message + "\n").encode())
+                    writer.write(ensure_trailing_newline(message).encode())
                 await writer.drain()
         except asyncio.CancelledError:
             self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
@@ -111,8 +117,13 @@ class SummonerClient:
                 data = await reader.readline()
                 if not data:
                     raise ServerDisconnected("Server closed the connection.")
-                message = data.decode()
-                await asyncio.gather(*(fn(message) for fn in receivers))
+                
+                try:
+                    payload = json.loads(data.decode())
+                except:
+                    payload = remove_last_newline(data.decode())
+
+                await asyncio.gather(*(fn(payload) for fn in receivers))
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
             raise
@@ -229,29 +240,3 @@ class SummonerClient:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
             self.loop.close()
             self.logger.info("Client exited cleanly.")
-
-
-if __name__ == "__main__":
-    
-    myagent = SummonerClient(name="MyAgent", option = "python")
-
-    @myagent.receive(route="custom_receive")
-    async def custom_receive_v1(message):
-        if message[:len("Warning:")] == "Warning:":
-            print("\r[From server]", message.strip(), flush=True)
-        else:
-            print("\r[Received]", message.strip(), flush=True)
-        print("r> ", end="", flush=True)
-
-    @myagent.send(route="custom_send")
-    async def custom_send_v1():
-        msg = await ainput("s> ")
-        return msg
-    
-    # async def custom_send_v2():
-    #     msg = "hello"
-    #     await asyncio.sleep(2)
-    #     return msg
-
-    myagent.run(host = "127.0.0.1", port = 8888)
-    
