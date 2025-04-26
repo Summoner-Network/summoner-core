@@ -4,8 +4,7 @@
 <img width="300px" src="../../img/merchants.png" />
 </p>
 
-This README provides a detailed walkthrough of an **automated negotiation protocol** between two autonomous agents: **SellerAgent** and **BuyerAgent**.  
-The protocol demonstrates **asynchronous communication**, **dynamic pricing strategies**, **randomized behaviors**, and **real-time tracking of negotiation outcomes**.
+This README provides a detailed walkthrough of an **automated negotiation protocol** between two autonomous agents: **SellerAgent** and **BuyerAgent**. The protocol demonstrates **asynchronous communication**, **dynamic pricing strategies**, **randomized behaviors**, and **real-time tracking of negotiation outcomes**.
 
 
 ## Overview
