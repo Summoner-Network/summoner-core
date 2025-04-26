@@ -17,6 +17,7 @@ if project_root not in sys.path:
 from utils import (
     remove_last_newline,
     ensure_trailing_newline,
+    fully_recover_json,
 )
 from logger import setup_logger
 
@@ -98,14 +99,17 @@ class SummonerClient:
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
                     senders = list(self.sending_functions.values())
-                messages = await asyncio.gather(*(fn() for fn in senders))
-                for message in messages:
-                    if message == "/quit":
+                payloads = await asyncio.gather(*(fn() for fn in senders))
+                print(payloads)
+                for payload in payloads:
+                    if isinstance(payload, str) and payload == "/quit":
                         stop_event.set()
                         break
+                    
+                    message = json.dumps(payload) if not isinstance(payload, str) else payload
                     writer.write(ensure_trailing_newline(message).encode())
                 await writer.drain()
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as e:
             self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
@@ -119,7 +123,8 @@ class SummonerClient:
                     raise ServerDisconnected("Server closed the connection.")
                 
                 try:
-                    payload = json.loads(data.decode())
+                    # payload = json.loads(data.decode())
+                    payload = fully_recover_json(data.decode())
                 except:
                     payload = remove_last_newline(data.decode())
 

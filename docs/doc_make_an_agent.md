@@ -14,20 +14,20 @@ You will need to open **three separate terminals**:
 
 **Terminal 1: Start the server**
 ```bash
-python user_space/myserver.py --option <rust_or_python>
+python templates/myserver.py --option <rust_or_python>
 ```
 Replace `<rust_or_python>` with one of the following options:
-- `python` — to use the Python-based server (built with `asyncio`)
-- `rss_1` — to use the Rust-based server (built with `tokio`)
+- `python` to use the Python-based server (built with `asyncio`)
+- `rss_1` to use the Rust-based server (built with `tokio`)
 
 **Terminal 2: Launch the first agent**
 ```bash
-python user_space/myclient.py
+python templates/myclient.py
 ```
 
 **Terminal 3: Launch the second agent**
 ```bash
-python user_space/myclient.py
+python templates/myclient.py
 ```
 
 Once the agents are running, you can begin chatting between them. You can also shut everything down cleanly by stopping the server and clients.
@@ -36,7 +36,7 @@ Once the agents are running, you can begin chatting between them. You can also s
 
 ### Basic Principles
 
-To build a custom agent, start by copying the `user_space/` folder and renaming it to something meaningful, such as `myproject/`.
+To build a custom agent, start by copying the `templates/` folder and renaming it to something meaningful, such as `myproject/`.
 
 You do not need to modify `myproject/myserver.py`; all agent logic belongs in `myproject/myclient.py`.
 
@@ -118,7 +118,6 @@ This example helps illustrate:
 - How they communicate asynchronously
 - How one agent’s message can trigger a response from another
 
----
 
 ### `question_agent.py` – the Asker
 
@@ -163,8 +162,6 @@ if __name__ == "__main__":
 
     agent.run(host="127.0.0.1", port=8888)
 ```
-
----
 
 ### `answer_bot.py` – the Responder
 
@@ -219,15 +216,13 @@ if __name__ == "__main__":
     agent.run(host="127.0.0.1", port=8888)
 ```
 
----
-
 ### Running the System
 
 You need **three terminals** to see this example in action.
 
 **Terminal 1: Start the server**
 ```bash
-python user_space/myserver.py --option python
+python myproject/myserver.py --option python
 ```
 
 **Terminal 2: Run the QuestionAgent**
@@ -239,8 +234,6 @@ python myproject/question_agent.py
 ```bash
 python myproject/answer_bot.py
 ```
-
----
 
 ### What You Will See
 
@@ -269,8 +262,6 @@ Received: {'addr': ['127.0.0.1', 56425], 'content': 'What is your name?'}
 Received: {'addr': ['127.0.0.1', 56425], 'content': 'What is the meaning of life?'}
 ...
 ```
-
----
 
 ### What This Demonstrates
 

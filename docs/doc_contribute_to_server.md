@@ -142,14 +142,14 @@ To begin development on a new Rust server implementation:
    ```
 
 8. **Test your server**  
-   Use the `myserver.py` script in `user_space`:
+   Use the `myserver.py` script in `templates`:
    ```bash
-   python user_space/myserver.py --option my_new_rust_patch
+   python templates/myserver.py --option my_new_rust_patch
    ```
 
    To launch clients for testing:
    ```bash
-   python user_space/myclient.py
+   python templates/myclient.py
    ```
 
 9. **Optional: Add to setup script**  
