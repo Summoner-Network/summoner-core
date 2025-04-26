@@ -3,7 +3,7 @@
 ## Quickstart
 
 <p align="center">
-<img width="350px" src="../img/protocol_v2.png" />
+<img width="300px" src="../img/merchants.png" />
 </p>
 
 Let us begin by launching two chat agents that communicate using the SPLT protocol. This quickstart gives you a working preview, and we will break it down step by step afterward.
@@ -19,6 +19,11 @@ python templates/myserver.py --option <rust_or_python>
 Replace `<rust_or_python>` with one of the following options:
 - `python` to use the Python-based server (built with `asyncio`)
 - `rss_1` to use the Rust-based server (built with `tokio`)
+
+
+<p align="center">
+<img width="350px" src="../img/protocol_v2.png" />
+</p>
 
 **Terminal 2: Launch the first agent**
 ```bash
@@ -103,7 +108,7 @@ You can expand this framework to support additional routes, logic, or complex in
 ## Example: Building a Question-Asker and an AnswerBot
 
 <p align="center">
-<img width="300px" src="../img/question_answer.png" />
+<img width="350px" src="../img/question_answer.png" />
 </p>
 
 Let us create a simple two-agent system that simulates a basic conversation.
