@@ -1,7 +1,7 @@
 [package]
 name = "rust_server_sdk_1"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "rust_server_sdk_1"         # ✅ This becomes `import rust_server_sdk_1` in Python
