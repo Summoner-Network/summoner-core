@@ -150,7 +150,12 @@ QUESTIONS = [
     "Do you like Rust or Python?",
     "How are you today?"
 ]
-tracker = {"count": 0}  # Keeps track of which question to send
+
+# Protects tracker updates against concurrent access
+tracker_lock = asyncio.Lock()
+
+# Keeps track of which question to send
+tracker = {"count": 0}
 
 if __name__ == "__main__":
     agent = SummonerClient(name="QuestionAgent", option="python")
@@ -160,8 +165,10 @@ if __name__ == "__main__":
     async def receive_response(msg):
         print(f"Received: {msg}")
         content = msg["content"] if isinstance(msg, dict) else msg
-        if content != "waiting...":
-            tracker["count"] += 1
+        if content != "waiting":
+            # Safely increment the count inside a lock to avoid race conditions
+            async with tracker_lock:
+                tracker["count"] += 1
 
     # Sends a new question every 2 seconds
     @agent.send(route="")
@@ -172,7 +179,7 @@ if __name__ == "__main__":
     agent.run(host="127.0.0.1", port=8888)
 ```
 
-### `answer_bot.py` – the Responder
+### `answer_agent.py` – the Responder
 
 This agent waits for specific questions and replies with matching answers. It adds a delay to simulate "thinking time".
 
@@ -220,7 +227,7 @@ if __name__ == "__main__":
             for addr, question in track_questions.items():
                 del track_questions[addr]
                 return ANSWERS[question]
-        return "waiting..."
+        return "waiting"
 
     agent.run(host="127.0.0.1", port=8888)
 ```

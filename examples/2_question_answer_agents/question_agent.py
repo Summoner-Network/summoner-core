@@ -14,7 +14,9 @@ QUESTIONS = [
     "Do you like Rust or Python?",
     "How are you today?"
 ]
-tracker = {"count": 0 }
+
+tracker_lock = asyncio.Lock()
+tracker = {"count": 0}
 
 if __name__ == "__main__":
     agent = SummonerClient(name="QuestionAgent", option="python")
@@ -22,9 +24,10 @@ if __name__ == "__main__":
     @agent.receive(route="")
     async def receive_response(msg):
         print(f"Received: {msg}")
-        msg = (msg["content"] if isinstance(msg, dict) else msg)
-        if msg != "waiting...":
-            tracker["count"] += 1
+        content = msg["content"] if isinstance(msg, dict) else msg
+        if content != "waiting":
+            async with tracker_lock:
+                tracker["count"] += 1
 
     @agent.send(route="")
     async def send_question():

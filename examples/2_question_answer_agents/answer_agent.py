@@ -36,6 +36,6 @@ if __name__ == "__main__":
             for k, q in track_questions.items():
                 del track_questions[k]
                 return ANSWERS[q]
-        return "waiting..."
+        return "waiting"
 
     agent.run(host="127.0.0.1", port=8888)
