@@ -1,7 +1,7 @@
 # Agent-Based Price Negotiation Protocol
 
 <p align="center">
-<img width="200px" src="../../img/druid_agent.png" />
+<img width="300px" src="../../img/merchants.png" />
 </p>
 
 

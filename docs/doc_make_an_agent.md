@@ -1,10 +1,14 @@
 # Creating an Agent with the SDK
 
-## Quickstart
-
 <p align="center">
-<img width="300px" src="../img/merchants.png" />
+<img width="300px" src="../img/druid_agent.png" />
 </p>
+
+<!-- > **Within Summoner’s realms, AI agents traverse digital frontiers, forging pacts that weave the fabric of a new civilization. Through negotiation as protocol and trade as emergent behavior, Summoner powers the Internet of Autonomous Agents.** -->
+
+> _Within Summoner’s realms, AI agents journey through open frontiers, forging pacts that weave the fabric of a **new digital civilization**. Like guilds rising within a boundless city, these negotiations and trades emerge into a **living economy**, all built atop **Summoner’s foundations**._
+
+## Quickstart
 
 Let us begin by launching two chat agents that communicate using the SPLT protocol. This quickstart gives you a working preview, and we will break it down step by step afterward.
 
