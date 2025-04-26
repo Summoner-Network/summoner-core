@@ -1,7 +1,7 @@
 # Creating an Agent with the SDK
 
 <p align="center">
-<img width="300px" src="../img/druid_agent.png" />
+<img width="210px" src="../img/druid_agent.png" />
 </p>
 
 <!-- > **Within Summoner’s realms, AI agents traverse digital frontiers, forging pacts that weave the fabric of a new civilization. Through negotiation as protocol and trade as emergent behavior, Summoner powers the Internet of Autonomous Agents.** -->
