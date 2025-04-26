@@ -69,7 +69,7 @@ cargo --version
 
 If you have just cloned the repository, run the setup script:
 ```bash
-bash setup.sh
+source setup.sh
 ```
 
 This will:

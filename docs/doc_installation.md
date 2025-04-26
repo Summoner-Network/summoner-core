@@ -62,7 +62,7 @@ cargo --version     # ✅ Should print the Cargo package manager version
 Once Python and Rust are installed, set up the project by running:
 
 ```bash
-bash setup.sh
+source setup.sh
 ```
 
 This script performs the following tasks:
