@@ -23,3 +23,12 @@ Click any of the links below to access detailed documentation for different part
 
 - ✅ **[Development Guidelines](docs/doc_development.md)**  
   Learn the coding practices, pull request workflows, and security policies for contributing to the repository. This guide explains how to work with the `dev` and `main` branches and maintain code quality across the project.
+
+## Advanced Examples
+
+<p align="center">
+<img width="180px" src="img/merchants.png" />
+</p>
+
+- ✅ **[Simulating Autonomous Negotiations Between Agents](examples/3_buyer_seller_agents/readme.md)**  
+  Explore a complete example where two agents negotiate dynamically over a shared resource. This guide demonstrates how to implement stateful decision-making, strategic counteroffers, and termination conditions, showcasing more advanced agent behaviors beyond basic message passing.
