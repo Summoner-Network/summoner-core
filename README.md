@@ -30,5 +30,5 @@ Click any of the links below to access detailed documentation for different part
 <img width="180px" src="img/merchants.png" />
 </p>
 
-- ✅ **[Simulating Autonomous Negotiations Between Agents](examples/3_buyer_seller_agents/readme.md)**  
+- ✅ **[Simulating Autonomous Negotiations Between Agents](examples/3_buyer_seller_agents/)**  
   Explore a complete example where two agents negotiate dynamically over a shared resource. This guide demonstrates how to implement stateful decision-making, strategic counteroffers, and termination conditions, showcasing more advanced agent behaviors beyond basic message passing.
