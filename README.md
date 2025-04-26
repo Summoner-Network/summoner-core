@@ -1,7 +1,7 @@
 # Agent SDK · Summoner Platform
 
 <p align="center">
-<img width="200px" src="img/92a3447d-6925-431e-a2d0-a1ee671cd9bd.png" />
+<img width="250px" src="img/92a3447d-6925-431e-a2d0-a1ee671cd9bd.png" />
 </p>
 
 > The **Summoner Agent SDK** empowers developers to build, deploy, and coordinate autonomous agents with integrated smart contracts and decentralized token-aligned incentive capabilities.
