@@ -1,5 +1,5 @@
 use tokio::time::{Instant, Duration};
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::{SystemTime, UNIX_EPOCH}};
 
 /// A generic rate-limiter interface.
 /// `allow(amount)` returns `true` if `amount` units are permitted,
@@ -69,36 +69,52 @@ Drawbacks / Gotchas:
 - Memory grows with number of events (O(N) storage).
 - Higher CPU overhead to purge old entries on each check.
 */
+/// Sliding window limiter that aggregates counts per second.
+/// Memory overhead O(window_secs) instead of O(event_count).
 pub struct SlidingWindowRateLimiter {
-    events: VecDeque<Instant>,
+    /// VecDeque of (unix_second, count) pairs
+    buckets: VecDeque<(u64, usize)>,
     window: Duration,
     max_events: usize,
 }
 
 impl SlidingWindowRateLimiter {
+    /// `max_events` over any rolling `window`
     pub fn new(max_events: usize, window: Duration) -> Self {
         Self {
-            events: VecDeque::with_capacity(max_events),
+            buckets: VecDeque::with_capacity(window.as_secs() as usize + 1),
             window,
             max_events,
         }
     }
 
     fn allow(&mut self, amount: u128) -> bool {
-        let now = Instant::now();
-        // purge old events
-        while let Some(&ts) = self.events.front() {
-            if now.duration_since(ts) > self.window {
-                self.events.pop_front();
+        // Current time, truncated to whole seconds
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // 1) Purge any buckets older than the window
+        while let Some(&(ts, _)) = self.buckets.front() {
+            if now_secs.saturating_sub(ts) > self.window.as_secs() {
+                self.buckets.pop_front();
             } else {
                 break;
             }
         }
 
         let n = amount as usize;
-        if self.events.len() + n <= self.max_events {
-            for _ in 0..n {
-                self.events.push_back(now);
+        // 2) Count events in remaining buckets
+        let total_in_window: usize = self.buckets.iter().map(|&(_, cnt)| cnt).sum();
+
+        // 3) If under limit, record these `n` events in the current-second bucket
+        if total_in_window + n <= self.max_events {
+            match self.buckets.back_mut() {
+                // if last bucket is this exact second, just increment its count
+                Some(back) if back.0 == now_secs => back.1 += n,
+                // otherwise push a new one
+                _ => self.buckets.push_back((now_secs, n)),
             }
             true
         } else {
