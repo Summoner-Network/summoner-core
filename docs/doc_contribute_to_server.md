@@ -175,20 +175,6 @@ Knowing “who owns what” at each step makes it easier to reason about lifetim
 
 ```mermaid
 graph TD
-  start_tokio_server --> run_server
-  run_server --> start_background_cleanup
-  run_server --> spawn_shutdown_listener
-  run_server --> spawn_backpressure_monitor
-  run_server --> accept_connections
-  accept_connections --> handle_backpressure_command
-  accept_connections --> handle_new_connection
-  handle_new_connection --> handle_connection
-  handle_connection --> handle_client_messages
-  handle_client_messages --> process_client_line
-  handle_client_messages --> apply_client_command
-  process_client_line --> broadcast_message
-
-  %% Edge labels %%
   start_tokio_server -->|give_up: server_config, logger; lend: –; pass: –| run_server
   run_server -->|give_up: quarantine_list, logger; lend: –; pass: –| start_background_cleanup
   run_server -->|give_up: shutdown_tx, logger; lend: –; pass: –| spawn_shutdown_listener
@@ -206,3 +192,4 @@ graph TD
   handle_client_messages -->|give_up: cmd; lend: sender, config, logger; pass: –| apply_client_command
 
   process_client_line -->|give_up: queue_tx; lend: sender, clients, logger, payload; pass: –| broadcast_message
+```
