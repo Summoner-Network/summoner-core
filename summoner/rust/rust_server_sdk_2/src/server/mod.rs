@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 // We’ll use Arc<Mutex<...>> to share a client’s writer handle safely.
 use std::sync::Arc;
 
+use ratelimiter::SlidingWindowRateLimiter;
 // Tokio’s non-blocking TCP listener and stream for incoming/outgoing connections.
 use tokio::net::{TcpListener, TcpStream};
 
@@ -413,7 +414,11 @@ async fn handle_connection(
     let mut reader = BufReader::new(reader_half).lines();
 
     // Per-client rate limiter
-    let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(rate_limit)));
+    let rate_limiter = Arc::new(
+        Mutex::new(
+            SlidingWindowRateLimiter::new(rate_limit as usize, Duration::from_secs(60))
+        )
+    );
 
     // Run the central message loop (handles lines, flow-control, timeout, shutdown)
     if let Err(e) = handle_client_messages(
@@ -472,7 +477,7 @@ async fn handle_client_messages(
     // How long before we drop an idle client
     timeout: Option<Duration>,
     // Per-client rate limiter
-    rate_limiter: Arc<Mutex<RateLimiter>>,
+    rate_limiter: Arc<Mutex<dyn RateLimiter>>,
     // All config settings
     config: &ServerConfig,
     // Logger for recording events
@@ -623,12 +628,12 @@ async fn process_client_line(
     line: String,
     sender: &Client,
     clients: &ClientList,
-    rate_limiter: &Arc<Mutex<RateLimiter>>,
+    rate_limiter: &Arc<Mutex<dyn RateLimiter>>,
     queue_tx: mpsc::Sender<usize>,
     logger: &Logger,
 ) {
     // 1) Rate limit: reset & check in one call
-    let within_limit = rate_limiter.lock().await.check_limit();
+    let within_limit = rate_limiter.lock().await.allow(1);
     if !within_limit {
         // Notify the client they’re sending too fast, then skip broadcasting
         let mut w = sender.writer.lock().await;
