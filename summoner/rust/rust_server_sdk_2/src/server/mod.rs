@@ -650,7 +650,7 @@ async fn process_client_line(
     logger: &Logger,
 ) {
     // 1) Rate limit: reset & check in one call
-    let within_limit = rate_limiter.lock().await.allow(1);
+    let within_limit = rate_limiter.lock().await.allow(line.capacity() as u128);
     if !within_limit {
         // Notify the client they’re sending too fast, then skip broadcasting
         let mut w = sender.writer.lock().await;
@@ -658,7 +658,7 @@ async fn process_client_line(
             .write_all(b"Warning: You are sending messages too quickly. Please slow down.\n")
             .await;
         return;
-    }
+    };
 
     // 2) Log the cleaned‐up message (no trailing newline)
     let clean = remove_last_newline(&line);

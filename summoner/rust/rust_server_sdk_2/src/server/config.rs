@@ -123,7 +123,8 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         let port                          = extract_or(dict, "port",                        8888);
         let connection_buffer_size        = extract_or(dict, "connection_buffer_size",     128);
         
-        let rate_limit                    = extract_or(dict, "rate_limit_msgs_per_minute", 300);
+        // TODO: Rename this to something more appropriate to what it is now (limit on bytes sent per minute)
+        let rate_limit                    = extract_or(dict, "rate_limit_msgs_per_minute", 2 * 1000 * 1000);
         let command_buffer_size           = extract_or(dict, "command_buffer_size",       32);
         let quarantine_cooldown_secs      = extract_or(dict, "quarantine_cooldown_secs",  300);
         let throttle_delay_ms             = extract_or(dict, "throttle_delay_ms",         200);
