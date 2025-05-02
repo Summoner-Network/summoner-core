@@ -162,8 +162,6 @@ To begin development on a new Rust server implementation:
 
 ## Module Documentation: `rust_server_sdk_2`
 
-## Function Dependency & Ownership Flow
-
 This diagram shows how our core server functions call one another **top-to-bottom**, and exactly how data moves between them:
 
 - **Nodes** are functions in `mod.rs`, from `start_tokio_server` down to low-level helpers.
