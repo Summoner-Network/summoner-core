@@ -19,6 +19,7 @@ from utils import (
 from logger import setup_logger
 import rust_server_sdk as rss
 import rust_server_sdk_1 as rss_1
+import rust_server_sdk_2 as rss_2
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -139,10 +140,11 @@ class SummonerServer:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def run(self, host='127.0.0.1', port=8888):
+    def run(self, host='127.0.0.1', port=8888, config = {}):
         rust_dispatch = {
             "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
-            "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None)
+            "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None),
+            "rss_2": lambda h, p : rss_2.start_tokio_server(self.name, {"host":h, "port":p, **config})
         }
 
         if self.option in rust_dispatch:

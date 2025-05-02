@@ -160,6 +160,39 @@ To begin development on a new Rust server implementation:
 
 ---
 
-## Module Documentation: `rust_server_sdk_1`
+## Module Documentation: `rust_server_sdk_2`
 
-*To be completed: Add documentation detailing the structure, functions, and responsibilities of `rust_server_sdk_1`.*
+*To be completed: Add documentation detailing the structure, functions, and responsibilities of `rust_server_sdk_2`.*
+
+graph TD
+  start_tokio_server --> run_server
+  run_server --> start_background_cleanup
+  run_server --> spawn_shutdown_listener
+  run_server --> spawn_backpressure_monitor
+  run_server --> accept_connections
+  accept_connections --> handle_backpressure_command
+  accept_connections --> handle_new_connection
+  handle_new_connection --> handle_connection
+  handle_connection --> handle_client_messages
+  handle_client_messages --> process_client_line
+  handle_client_messages --> apply_client_command
+  process_client_line --> broadcast_message
+
+  %% Edge labels %%
+  start_tokio_server -->|give_up: server_config, logger; lend: –; pass: –| run_server
+  run_server -->|give_up: quarantine_list, logger; lend: –; pass: –| start_background_cleanup
+  run_server -->|give_up: shutdown_tx, logger; lend: –; pass: –| spawn_shutdown_listener
+  run_server -->|give_up: backpressure_rx, command_tx, logger, backpressure_policy; lend: –; pass: –| spawn_backpressure_monitor
+  run_server -->|give_up: listener, clients, shutdown_tx, shutdown_rx, backpressure_tx, command_rx, quarantine_list, config, logger; lend: –; pass: –| accept_connections
+
+  accept_connections -->|give_up: cmd; lend: clients, quarantine_list, logger; pass: –| handle_backpressure_command
+  accept_connections -->|give_up: stream, addr, connection_count; lend: clients, shutdown_tx, backpressure_tx, quarantine_list, config, logger; pass: –| handle_new_connection
+
+  handle_new_connection -->|give_up: reader_half, client, clients_for_task, shutdown_rx, backpressure_tx, control_rx; lend: config, logger; pass: –| handle_connection
+
+  handle_connection -->|give_up: rate_limiter, client_timeout, rate_limit, control_rx; lend: reader, client, clients, shutdown_rx, backpressure_tx, config, logger; pass: –| handle_client_messages
+
+  handle_client_messages -->|give_up: line, queue_tx; lend: sender, clients, rate_limiter, logger; pass: –| process_client_line
+  handle_client_messages -->|give_up: cmd; lend: sender, config, logger; pass: –| apply_client_command
+
+  process_client_line -->|give_up: queue_tx; lend: sender, clients, logger, payload; pass: –| broadcast_message
