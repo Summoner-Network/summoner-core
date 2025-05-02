@@ -162,8 +162,20 @@ To begin development on a new Rust server implementation:
 
 ## Module Documentation: `rust_server_sdk_2`
 
-*To be completed: Add documentation detailing the structure, functions, and responsibilities of `rust_server_sdk_2`.*
+## Function Dependency & Ownership Flow
 
+This diagram shows how our core server functions call one another **top-to-bottom**, and exactly how data moves between them:
+
+- **Nodes** are functions in `mod.rs`, from `start_tokio_server` down to low-level helpers.
+- **Arrows** show “A → B” when **A** directly calls **B**.
+- **Edge labels** explain three kinds of data movement on each call:
+  - **give_up:** ownership is moved from caller to callee (caller can no longer use it).
+  - **lend:** caller retains ownership but lends a borrow (mutable or immutable) to callee.
+  - **pass:** caller passes along a reference it itself borrowed.
+
+Knowing “who owns what” at each step makes it easier to reason about lifetimes, avoid accidental clones, and ensure thread-safe access across `async` tasks.
+
+```mermaid
 graph TD
   start_tokio_server --> run_server
   run_server --> start_background_cleanup
