@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use ratelimiter::SlidingWindowRateLimiter;
+use tokio::net::tcp::OwnedWriteHalf;
 // Tokio’s non-blocking TCP listener and stream for incoming/outgoing connections.
 use tokio::net::{TcpListener, TcpStream};
 
@@ -75,6 +76,26 @@ pub struct Client {
 
     // Channel to send per-client control commands (throttle, flow-control) to that client’s task.
     pub control_tx: mpsc::Sender<ClientCommand>,
+}
+
+impl Client {
+    /// Create a new connected client handle.
+    ///
+    /// # Parameters
+    /// - `addr`: the peer socket address (for logging/ID)
+    /// - `writer`: the write‐half of the TCP stream
+    /// - `control_tx`: channel to send this client's control commands
+    pub fn new(
+        addr: SocketAddr,
+        writer: OwnedWriteHalf,
+        control_tx: mpsc::Sender<ClientCommand>,
+    ) -> Self {
+        Client {
+            addr,
+            writer: Arc::new(Mutex::new(writer)),
+            control_tx,
+        }
+    }
 }
 
 // A shared, asynchronous list of all connected clients.
@@ -340,11 +361,7 @@ async fn handle_new_connection(
     let (control_tx, control_rx) = mpsc::channel(config.control_channel_capacity);
 
     // 6) Build our Client struct, wrapping the writer in Arc<Mutex> for safe sharing
-    let client = Client {
-        addr,
-        writer: Arc::new(Mutex::new(writer_half)),
-        control_tx,
-    };
+    let client = Client::new(addr, writer_half, control_tx);
 
     // 7) Register the client in the global list under a write-lock
     {
