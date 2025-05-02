@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 // Arc = shared ownership; Mutex = safe shared mutation
 use std::sync::Arc;
 
+use futures::future::join_all;
 // Import TCP-related tools from the async runtime Tokio
 use tokio::net::{TcpListener, TcpStream};
 
@@ -410,32 +411,39 @@ async fn broadcast_message(
     addr: SocketAddr,
     msg: &str,
     queue_tx: mpsc::Sender<usize>,
-    logger: &Logger
+    logger: &Logger,
 ) {
-    // Lock the client list to broadcast to all others
+    // 1) Grab the list and backpressure info
     let others = clients.lock().await;
-    
-    // Count pending messages for backpressure monitoring
     let queue_size = others.len();
-    
-    // Try to send queue size through the channel
     if queue_tx.try_send(queue_size).is_err() {
-        logger.warn(&format!("⚠️ Backpressure monitoring channel full for client {}", addr));
+        logger.warn(&format!("⚠️ Backpressure channel full for {}", addr));
     }
-    
-    // Send to each client
+
+    // 2) Build the payload once
+    let payload = ensure_trailing_newline(msg);
+
+    // 3) Build one future per client (skipping the sender)
+    let mut tasks = Vec::with_capacity(others.len());
     for client in others.iter() {
-        // Don't send the message back to the sender
         if Arc::ptr_eq(sender, client) {
             continue;
         }
-        
-        // Lock each client's writer and send the message
-        let mut w = client.lock().await;
-        if let Err(e) = w.write_all(ensure_trailing_newline(&msg).as_bytes()).await {
-            logger.warn(&format!("❌ Failed to send to client: {}", e));
-        }
+
+        let client = Arc::clone(client);
+        let payload = payload.clone();        // String clone
+        let addr = addr;
+        let logger = logger;                  // &Logger
+        tasks.push(async move {
+            let mut w = client.lock().await;
+            if let Err(e) = w.write_all(payload.as_bytes()).await {
+                logger.warn(&format!("❌ Failed to send to {}: {}", addr, e));
+            }
+        });
     }
+
+    // 4) Run them all in parallel
+    join_all(tasks).await;
 }
 
 /// This function spawns a background task that:

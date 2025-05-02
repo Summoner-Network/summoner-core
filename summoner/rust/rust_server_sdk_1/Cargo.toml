@@ -16,6 +16,8 @@ chrono = "0.4"                                                # ✅ Timestamps i
 fern = { version = "0.6", features = ["colored"] }            # ✅ Pretty logger + file support
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+prost = "0.13.5"
+futures = "0.3"
 
 
 
