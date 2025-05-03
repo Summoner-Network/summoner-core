@@ -59,18 +59,58 @@ cargo --version     # ✅ Should print the Cargo package manager version
 
 ## 3. Run the Setup Script
 
-Once Python and Rust are installed, set up the project by running:
+Once Python and Rust are installed, initialize the project environment by running:
 
 ```bash
 source setup.sh
 ```
 
-This script performs the following tasks:
+This script performs the following actions:
 
 - Creates a **Python virtual environment** in the root directory (`venv`)
 - Installs required **Python packages** listed in `requirements.txt`
-- Installs all available **Rust server implementations**, using `Cargo.lock` to ensure consistent versions
-- Creates a base **`.env`** file for environment configuration
+- Generates a default **`.env`** file with configuration placeholders
+- Installs all available **Rust server implementations**, using `Cargo.lock` to ensure consistent builds
+- ✨ **[NEW]** Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
+
+
+### What This Means for Imports
+
+With `summoner` installed as an editable pip package, you can write imports like:
+
+```python
+from summoner.server import SummonerServer
+```
+
+... without modifying your `PYTHONPATH`.
+
+Previously, without a proper package installation, you needed boilerplate like:
+
+```python
+target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+if target_path not in sys.path:
+    sys.path.insert(0, target_path)
+```
+
+### How to Run Scripts That Use `summoner`
+
+Because `summoner` is now installed as a package, Python expects you to use the **module execution syntax** when running scripts that depend on it:
+
+```bash
+python -m <dotted.path.to.module> <args>
+```
+
+#### ✅ Example (correct):
+```bash
+python -m templates.myserver --config templates/server_config.json
+```
+
+This ensures `summoner` is properly found and imported.
+
+#### ❌ Common mistake (will fail):
+```bash
+python templates/myserver.py --config templates/server_config.json
+```
 
 ---
 

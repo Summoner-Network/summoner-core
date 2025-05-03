@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.8"]
+build-backend = "maturin"
+
+[project]
+name = "summoner"
+version = "0.1.0"
+description = "Summoner's SDK"
+authors = [{ name = "Remy Tuyeras", email = "rtuyeras@summoner.to" }, { name = "Elliott Dehnbostel", email = "" }]
+dependencies = [
+    "asyncio==3.4.3",
+    "aioconsole==0.8.1",
+    "python-dotenv==0.9.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.8",
+    "pytest>=8.3.0",
+    "black",
+    "ruff"
+]
+
+[tool.maturin]
+bindings = "pyo3"
+python-source = "."

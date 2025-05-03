@@ -2,11 +2,6 @@ import os
 import sys
 import asyncio
 import random
-
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../.."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-
 from summoner.client import SummonerClient
 
 state = {
@@ -129,7 +124,7 @@ if __name__ == "__main__":
                 decision = state["agreement"]
 
             if decision == "interested":
-                print(f"\033[96m[{agent.name}] Interested offer: {offer}\033[0m")
+                print(f"\033[96m[{agent.name}] Interested in offer: {offer}\033[0m")
                 return {"status": "interested", "price": offer}
             elif decision == "accept":
                 print(f"\033[92m[{agent.name}] Accepted offer: {offer}\033[0m")

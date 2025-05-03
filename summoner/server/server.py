@@ -15,6 +15,7 @@ if project_root not in sys.path:
 from utils import (
     remove_last_newline, 
     ensure_trailing_newline,
+    load_config,
     )
 from logger import setup_logger
 import rust_server_sdk as rss
@@ -28,7 +29,6 @@ class ClientDisconnected(Exception):
 class SummonerServer:
     
     __slots__: tuple[str, ...] = (
-        "option",
         "name",
         "logger",
         "loop",
@@ -38,11 +38,7 @@ class SummonerServer:
         "tasks_lock",
     )
 
-    def __init__(self, name: Optional[str] = None, option: Optional[str] = None):
-        
-        # Can be "python" or "rust"
-        self.option = option or "python"
-
+    def __init__(self, name: Optional[str] = None):
         # Give a name to the server
         self.name = name if isinstance(name, str) else "<server:no-name>"
         self.logger = setup_logger(self.name)
@@ -140,16 +136,25 @@ class SummonerServer:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def run(self, host='127.0.0.1', port=8888, config = {}):
+    def run(self, host='127.0.0.1', port=8888, config_path = ""):
+        server_config = load_config(config_path=config_path, debug=True)
+
         rust_dispatch = {
             "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
             "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None),
-            "rss_2": lambda h, p : rss_2.start_tokio_server(self.name, {"host":h, "port":p, **config})
+            "rss_2": lambda h, p : rss_2.start_tokio_server(
+                self.name, 
+                {
+                "host":h, 
+                "port":p, 
+                **server_config.get("hyper_parameters", {})
+                })
         }
 
-        if self.option in rust_dispatch:
+        option = server_config.get("version", None)
+        if option in rust_dispatch:
             try:
-                rust_dispatch[self.option](host, port)
+                rust_dispatch[option](host, port)
             except KeyboardInterrupt:
                 pass
             return

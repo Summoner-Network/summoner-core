@@ -28,6 +28,7 @@ summoner
 ├── rust               # Rust server implementations
 │   ├── rust_server_sdk
 │   └── rust_server_sdk_1
+│   └── rust_server_sdk_2
 └── server             # Python server
 ```
 
@@ -45,7 +46,6 @@ myserver = SummonerServer(name="MyServer", option="my_new_rust_patch")
 
 The following sections guide you through setting up and integrating your custom Rust implementation.
 
----
 
 ## Prerequisites
 
@@ -79,14 +79,13 @@ This will:
 
 More details are available in the [Installation Guide](doc_installation.md).
 
----
 
 ## Creating a New Rust Server Module
 
 To begin development on a new Rust server implementation:
 
 1. **Identify a base module**  
-   Navigate to `summoner/rust/` and locate the most recent module (e.g. `rust_server_sdk_1`).
+   Navigate to `summoner/rust/` and locate the most recent module (e.g. `rust_server_sdk_2`).
 
 2. **Duplicate and rename**  
    Copy the folder and rename it (e.g. `awesome_rust_server`).
@@ -97,7 +96,7 @@ To begin development on a new Rust server implementation:
    [package]
    name = "awesome_rust_server"
    version = "0.1.0"
-   edition = "2021"
+   edition = "2024"
 
    [lib]
    name = "awesome_rust_server"
@@ -131,34 +130,47 @@ To begin development on a new Rust server implementation:
    ```python
    import awesome_rust_server as awesome_rust_server
 
-    # ... scroll down the code until you reach run() ...
+   # ... scroll down the code until you reach run() ...
 
-   def run(self, host='127.0.0.1', port=8888):
+   def run(self, host='127.0.0.1', port=8888, config_path = ""):
+       server_config = load_config(config_path=config_path, debug=True)
+
        rust_dispatch = {
            "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
-           "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None),
-           "my_new_rust_patch": lambda h, p: awesome_rust_server.start_tokio_server(self.name, h, p, None, None, None),
+           # .... previous Rust implementations here ...
+           "my_new_rust_patch": lambda h, p: awesome_rust_server.start_tokio_server(
+               self.name, 
+               {
+                   "host": h,
+                   "port": p,
+                   **server_config.get("hyper_parameters", {})
+               }),
        }
    ```
 
-8. **Test your server**  
+8. **Refresh the Python SDK installation**  
+   Because you modified `server.py`, the `summoner` package must be reinstalled in editable mode to reflect those changes. Run:
+   ```bash
+   pip uninstall -y summoner
+   pip install -e summoner/
+   ```
+
+9. **Test your server**  
    Use the `myserver.py` script in `templates`:
    ```bash
-   python templates/myserver.py --option my_new_rust_patch
+   python -m templates.myserver --config server_config.json
    ```
 
    To launch clients for testing:
    ```bash
-   python templates/myclient.py
+   python -m templates.myclient
    ```
 
-9. **Optional: Add to setup script**  
-   If your module should be installed with `setup.sh`, add:
-   ```bash
-   bash reinstall_rust_server.sh awesome_rust_server
-   ```
-
----
+10. **Optional: Add to setup script**  
+    If your module should be installed automatically via `setup.sh`, add:
+    ```bash
+    bash reinstall_python_sdk.sh awesome_rust_server
+    ```
 
 ## Module Documentation: `rust_server_sdk_2`
 

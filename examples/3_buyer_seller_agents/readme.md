@@ -156,18 +156,24 @@ The success rate is calculated as:
 
 ## How to Run
 
-Open two terminals.
+Open three terminals.
 
 In the first terminal (SellerAgent):
 
 ```bash
-python examples/3_buyer_seller_agents/seller_agent.py
+python -m examples.3_buyer_seller_agents.seller_agent
 ```
 
 In the second terminal (BuyerAgent):
 
 ```bash
-python examples/3_buyer_seller_agents/buyer_agent.py
+python -m examples.3_buyer_seller_agents.buyer_agent
+```
+
+In the third terminal (MyServer):
+
+```bash
+python -m examples.3_buyer_seller_agents.myserver --config server_config.json
 ```
 
 The agents will connect locally (`127.0.0.1:8888`) and automatically start negotiating continuously.

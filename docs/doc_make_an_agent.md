@@ -18,12 +18,45 @@ You will need to open **three separate terminals**:
 
 **Terminal 1: Start the server**
 ```bash
-python templates/myserver.py --option <rust_or_python>
+python -m templates.myserver --config <path_to_config>
 ```
-Replace `<rust_or_python>` with one of the following options:
-- `python` to use the Python-based server (built with `asyncio`)
-- `rss_1` to use the Rust-based server (built with `tokio`)
+Replace <path_to_config> with the path to your configuration file (e.g., templates/server_config.json). The file should follow this structure:
+```json
+{
+    "version": "rss_2",
+    "hyper_parameters": {
+        "host": "127.0.0.1",
+        "port": 8080,
 
+        "connection_buffer_size": 256,
+        "command_buffer_size": 64,
+        "control_channel_capacity": 8,
+        "queue_monitor_capacity": 100,
+
+        "client_timeout_secs": 600,
+        "rate_limit_msgs_per_minute": 1000,
+        "timeout_check_interval_secs": 30,
+        "accept_error_backoff_ms": 100,
+
+        "quarantine_cooldown_secs": 600,
+        "quarantine_cleanup_interval_secs": 60,
+
+        "throttle_delay_ms": 200,
+        "flow_control_delay_ms": 1000,
+
+        "worker_threads": 4,
+
+        "backpressure_policy": {
+            "enable_throttle": true,
+            "throttle_threshold": 50,
+            "enable_flow_control": true,
+            "flow_control_threshold": 150,
+            "enable_disconnect": true,
+            "disconnect_threshold": 300
+        }
+    }
+}
+```
 
 <p align="center">
 <img width="350px" src="../img/protocol_v2.png" />
@@ -31,12 +64,12 @@ Replace `<rust_or_python>` with one of the following options:
 
 **Terminal 2: Launch the first agent**
 ```bash
-python templates/myclient.py
+python -m templates.myclient
 ```
 
 **Terminal 3: Launch the second agent**
 ```bash
-python templates/myclient.py
+python -m templates.myclient
 ```
 
 Once the agents are running, you can begin chatting between them. You can also shut everything down cleanly by stopping the server and clients.
@@ -54,10 +87,6 @@ Below is a minimal agent template. You can adjust the `name`, `host`, and `port`
 ```python
 import os
 import sys
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-
 from summoner.client import SummonerClient
 from aioconsole import ainput
 
@@ -76,10 +105,6 @@ You define how an agent behaves by using the `@send` and `@receive` decorators p
 ```python
 import os
 import sys
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-
 from summoner.client import SummonerClient
 from aioconsole import ainput
 
@@ -136,12 +161,6 @@ This agent sends a rotating list of questions. It also listens for any response 
 import os
 import sys
 import asyncio
-
-# Setup: make sure we can import from the main project directory
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-
 from summoner.client import SummonerClient
 
 QUESTIONS = [
@@ -187,12 +206,6 @@ This agent waits for specific questions and replies with matching answers. It ad
 import os
 import sys
 import asyncio
-
-# Setup: import from the main project directory
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-
 from summoner.client import SummonerClient
 
 # Predefined answers for each known question
@@ -238,17 +251,17 @@ You need **three terminals** to see this example in action.
 
 **Terminal 1: Start the server**
 ```bash
-python myproject/myserver.py --option python
+python -m myproject.myserver --config server_config.json
 ```
 
 **Terminal 2: Run the QuestionAgent**
 ```bash
-python myproject/question_agent.py
+python -m myproject.question_agent
 ```
 
 **Terminal 3: Run the AnswerBot**
 ```bash
-python myproject/answer_bot.py
+python -m myproject.answer_bot
 ```
 
 ### What You Will See
