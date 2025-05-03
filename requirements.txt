@@ -3,4 +3,4 @@ asyncio==3.4.3
 aioconsole==0.8.1
 maturin==1.8.3
 dotenv==0.9.9
-eth-account=0.13.7
+cryptography==44.0.3
