@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):
-        msg = (msg["content"] if isinstance(msg, dict) else msg) 
+        msg = (msg["content"]["payload"]["message"] if isinstance(msg, dict) else msg) 
         tag = ("\r[From server]" if msg[:len("Warning:")] == "Warning:" else "\r[Received]")
         print(tag, msg, flush=True)
         print("r> ", end="", flush=True)

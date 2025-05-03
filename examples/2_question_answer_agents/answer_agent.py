@@ -23,7 +23,7 @@ if __name__ == "__main__":
     @agent.receive(route="")
     async def handle_question(msg):
         print(f"Received: {msg}")
-        msg = (msg["content"] if isinstance(msg, dict) else msg)
+        msg = (msg["content"]["payload"]["message"] if isinstance(msg, dict) else msg)
         addr = (msg["addr"] if isinstance(msg, dict) else "")
         if msg in ANSWERS:
             async with track_lock:

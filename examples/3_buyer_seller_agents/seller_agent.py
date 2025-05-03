@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
         @agent.receive(route="buyer_offer")
         async def handle_buyer_offer(msg):
-            content = msg["content"]
+            content = msg["content"]["payload"]["message"]
             print(f"[Received] {content}")
 
             async with state_lock:
