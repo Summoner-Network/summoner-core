@@ -113,7 +113,7 @@ class SummonerClient:
                     
                     message = json.dumps({
                         "message": payload,
-                        "id": os.urandom(32).hex()
+                        "idempotency_key": os.urandom(32).hex()
                     })
                     signature = sign(message, os.environ["SECRET_KEY"])
                     public_key = derive_public_key(os.environ["SECRET_KEY"])
