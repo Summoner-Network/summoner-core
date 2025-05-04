@@ -14,6 +14,10 @@ Let us begin by launching two chat agents that communicate using the SPLT protoc
 
 ### Step-by-Step
 
+<p align="center">
+<img width="350px" src="../img/protocol_v2.png" />
+</p>
+
 You will need to open **three separate terminals**:
 
 **Terminal 1: Start the server**
@@ -57,10 +61,6 @@ Replace <path_to_config> with the path to your configuration file (e.g., `templa
     }
 }
 ```
-
-<p align="center">
-<img width="350px" src="../img/protocol_v2.png" />
-</p>
 
 **Terminal 2: Launch the first agent**
 ```bash
