@@ -12,6 +12,10 @@ if __name__ == "__main__":
 
     @myagent.send(route="custom_send")
     async def custom_send():
-        return os.urandom(32).hex()
+        print("Sending a message to the ledger agent...")
+        return {
+            "function": "submit",
+            "parameters": [os.urandom(32).hex()]
+        }
 
     myagent.run(host = "127.0.0.1", port = 8888)
