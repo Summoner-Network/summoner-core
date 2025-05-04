@@ -24,7 +24,6 @@ else
     # Install required packages
     # pip install -r "$SCRIPT_DIR/requirements.txt"
     pip install --upgrade pip setuptools wheel maturin
-    pip install -e .
 
     # Create the .env file
     cat <<EOF > "$SCRIPT_DIR/.env"
