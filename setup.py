@@ -8,7 +8,7 @@ setup(
     author_email="rtuyeras@summoner.to",
     packages=find_packages(include=["summoner", "summoner.*"]),
     install_requires=[
-        "asyncio==3.4.3",
+        "aioconsole==0.8.1",
         "python-dotenv==0.9.0"
     ],
     extras_require={
