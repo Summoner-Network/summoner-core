@@ -2,7 +2,7 @@
   "version": "rss_2",
   "hyper_parameters": {
     "host": "127.0.0.1",
-    "port": 8080,
+    "port": 8888,
     "connection_buffer_size": 256,
     "command_buffer_size": 64,
     "control_channel_capacity": 8,
