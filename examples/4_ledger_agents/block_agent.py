@@ -12,20 +12,23 @@ if __name__ == "__main__":
 
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):
+        print(msg)
         if msg["content"]["function"] == "submit":
             async with buffer_lock:
                 buffer.append(msg["content"]["parameters"][0])
 
     @myagent.send(route="custom_send")
     async def custom_send():
+        global buffer
         tmp = []
         async with buffer_lock:
             tmp = buffer
             buffer = []
-        print("Produced a block with {} transactions.".format(len(tmp)))
-        return {
-            "function": "sequence",
-            "parameters": [tmp]
-        }
+        if len(tmp) != 0:
+            print("Produced a block with {} transactions.".format(len(tmp)))
+            return {
+                "function": "sequence",
+                "parameters": [tmp]
+            }
 
     myagent.run(host = "127.0.0.1", port = 8888)
