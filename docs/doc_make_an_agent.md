@@ -10,13 +10,15 @@
 
 ## Quickstart
 
-Let us begin by launching two chat agents that communicate using the SPLT protocol. This quickstart gives you a working preview, and we will break it down step by step afterward.
-
-### Step-by-Step
+Let us begin by launching two chat agents that communicate using the SPLT protocol. 
 
 <p align="center">
 <img width="350px" src="../img/protocol_v2.png" />
 </p>
+
+This quickstart gives you a working preview, and we will break it down step by step afterward.
+
+### Step-by-Step
 
 You will need to open **three separate terminals**:
 
