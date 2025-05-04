@@ -7,7 +7,6 @@ PREFIX_FILTER="$1"  # e.g., "rust_server_sdk_"
 
 # --- Resolve paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SUMMONER_DIR="$SCRIPT_DIR/summoner"
 
 # --- Reinstall matching Rust crates ---
 echo "🔁 Calling reinstall_rust_server.sh with prefix: $PREFIX_FILTER"
