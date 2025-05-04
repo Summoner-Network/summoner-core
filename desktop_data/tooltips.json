@@ -1,0 +1,28 @@
+{
+  "version": "The version of the server implementation (e.g. 'rss', 'rss_1', 'rss_2')",
+  "hyper_parameters": {
+    "host": "IP address or hostname to bind (e.g. '127.0.0.1')",
+    "port": "TCP port number (e.g. 8888)",
+    "connection_buffer_size": "OS-level backlog size (default 128)",
+    "command_buffer_size": "Backpressure command buffer capacity (default 32)",
+    "control_channel_capacity": "Client control channel buffer size (default 8)",
+    "queue_monitor_capacity": "Queue report buffer capacity per client (default 100)",
+    "client_timeout_secs": "Idle client timeout in seconds (default 300)",
+    "rate_limit_msgs_per_minute": "Max messages per minute (default 300)",
+    "timeout_check_interval_secs": "Interval to check timeouts (default 30)",
+    "accept_error_backoff_ms": "Backoff ms after 'accept' error (default 100)",
+    "quarantine_cooldown_secs": "Quarantine duration in seconds (default 300)",
+    "quarantine_cleanup_interval_secs": "Cleanup interval for quarantine (default 60)",
+    "throttle_delay_ms": "Delay ms when throttling (default 200)",
+    "flow_control_delay_ms": "Delay ms during flow control (default 1000)",
+    "worker_threads": "Number of Tokio threads (default = cores-1)",
+    "backpressure_policy": {
+      "enable_throttle": "Enable throttling when queue > threshold",
+      "throttle_threshold": "Start throttling at this queue length",
+      "enable_flow_control": "Enable flow control when queue > threshold",
+      "flow_control_threshold": "Start flow control at this queue length",
+      "enable_disconnect": "Disconnect clients when queue > threshold",
+      "disconnect_threshold": "Disconnect when queue length exceeds this"
+    }
+  }
+}
