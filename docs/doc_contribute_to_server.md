@@ -152,18 +152,18 @@ To begin development on a new Rust server implementation:
    Because you modified `server.py`, the `summoner` package must be reinstalled in editable mode to reflect those changes. Run:
    ```bash
    pip uninstall -y summoner
-   pip install -e summoner/
+   pip install -e .
    ```
 
 9. **Test your server**  
    Use the `myserver.py` script in `templates`:
    ```bash
-   python -m templates.myserver --config server_config.json
+   python templates/myserver.py --config server_config.json
    ```
 
    To launch clients for testing:
    ```bash
-   python -m templates.myclient
+   python templates/myclient.py
    ```
 
 10. **Optional: Add to setup script**  

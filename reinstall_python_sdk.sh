@@ -26,6 +26,6 @@ fi
 
 # Reinstall as editable
 echo "📦 Reinstalling 'summoner' in editable mode..."
-pip install -e summoner/
+pip install -e .
 
 echo "✅ Python SDK reinstalled with prefix filter: '$PREFIX_FILTER'"

@@ -2,7 +2,6 @@
 
 Before running the platform, ensure that both **Python** and **Rust** are installed on your system. The `setup.sh` script will then take care of configuring the environment and compiling necessary components.
 
----
 
 ## 1. Install Python
 
@@ -26,8 +25,6 @@ brew install python
 sudo apt update
 sudo apt install python3 python3-venv python3-pip
 ```
-
----
 
 ## 2. Install Rust
 
@@ -54,8 +51,6 @@ After installation, restart your terminal and verify:
 rustc --version     # ✅ Should print the Rust compiler version
 cargo --version     # ✅ Should print the Cargo package manager version
 ```
-
----
 
 ## 3. Run the Setup Script
 
@@ -92,28 +87,6 @@ if target_path not in sys.path:
     sys.path.insert(0, target_path)
 ```
 
-### How to Run Scripts That Use `summoner`
-
-Because `summoner` is now installed as a package, Python expects you to use the **module execution syntax** when running scripts that depend on it:
-
-```bash
-python -m <dotted.path.to.module> <args>
-```
-
-#### ✅ Example (correct):
-```bash
-python -m templates.myserver --config templates/server_config.json
-```
-
-This ensures `summoner` is properly found and imported.
-
-#### ❌ Common mistake (will fail):
-```bash
-python templates/myserver.py --config templates/server_config.json
-```
-
----
-
 ## 4. Configure Environment Variables
 
 The `.env` file defines key runtime parameters such as logging and database connection. You may need to adjust it to match your local setup:
@@ -135,7 +108,5 @@ ENABLE_CONSOLE_LOG = os.getenv("ENABLE_CONSOLE_LOG", "true").lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///local.db")
 SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
 ```
-
----
 
 At this point, your development environment should be fully configured and ready to use. You can now launch the server or begin contributing code. For more details, refer to the [contribution guide](doc_contribute_to_server.md).

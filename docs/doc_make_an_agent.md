@@ -18,15 +18,15 @@ You will need to open **three separate terminals**:
 
 **Terminal 1: Start the server**
 ```bash
-python -m templates.myserver --config <path_to_config>
+python templates/myserver.py --config <path_to_config>
 ```
-Replace <path_to_config> with the path to your configuration file (e.g., templates/server_config.json). The file should follow this structure:
+Replace <path_to_config> with the path to your configuration file (e.g., `templates/server_config.json`). The file should follow this structure:
 ```json
 {
     "version": "rss_2",
     "hyper_parameters": {
         "host": "127.0.0.1",
-        "port": 8080,
+        "port": 8888,
 
         "connection_buffer_size": 256,
         "command_buffer_size": 64,
@@ -64,12 +64,12 @@ Replace <path_to_config> with the path to your configuration file (e.g., templat
 
 **Terminal 2: Launch the first agent**
 ```bash
-python -m templates.myclient
+python  templates/myclient.py
 ```
 
 **Terminal 3: Launch the second agent**
 ```bash
-python -m templates.myclient
+python templates/myclient.py
 ```
 
 Once the agents are running, you can begin chatting between them. You can also shut everything down cleanly by stopping the server and clients.
@@ -251,17 +251,17 @@ You need **three terminals** to see this example in action.
 
 **Terminal 1: Start the server**
 ```bash
-python -m myproject.myserver --config server_config.json
+python myproject/myserver.py --config server_config.json
 ```
 
 **Terminal 2: Run the QuestionAgent**
 ```bash
-python -m myproject.question_agent
+python myproject/question_agent.py
 ```
 
 **Terminal 3: Run the AnswerBot**
 ```bash
-python -m myproject.answer_bot
+python myproject/answer_bot.py
 ```
 
 ### What You Will See

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the command you want to run
-COMMAND="source venv/bin/activate && python -m templates.myserver --config templates/server_config.json"
+COMMAND="source venv/bin/activate && python templates/myserver.py --config templates/server_config.json"
 
 # Get the current working directory
 WORKDIR="$(pwd)"

@@ -161,19 +161,19 @@ Open three terminals.
 In the first terminal (SellerAgent):
 
 ```bash
-python -m examples.3_buyer_seller_agents.seller_agent
+python  examples/3_buyer_seller_agents/seller_agent.py
 ```
 
 In the second terminal (BuyerAgent):
 
 ```bash
-python -m examples.3_buyer_seller_agents.buyer_agent
+python examples/3_buyer_seller_agents/buyer_agent.py
 ```
 
 In the third terminal (MyServer):
 
 ```bash
-python -m examples.3_buyer_seller_agents.myserver --config server_config.json
+python examples/3_buyer_seller_agents/myserver.py --config server_config.json
 ```
 
 The agents will connect locally (`127.0.0.1:8888`) and automatically start negotiating continuously.
