@@ -26,7 +26,7 @@ if __name__ == "__main__":
         try:
             # Subreddit to listen to
             subreddit = await reddit.subreddit('AI_agents')
-            async for submission in subreddit.new():
+            async for submission in subreddit.stream.submissions():
                 serializable = {
                     "title": submission.title,
                     "author": str(submission.author),
@@ -35,7 +35,7 @@ if __name__ == "__main__":
                     "created_utc": submission.created_utc
                 }
                 print(f"Got new poast: {serializable}")
-                return serializable
+                yield serializable
         except Exception as e:
             print(f"An error occurred: {e}")
             await asyncio.sleep(60)  # Wait a bit before continuing in case of error

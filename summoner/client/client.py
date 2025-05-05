@@ -3,7 +3,7 @@ import signal
 import os
 import sys
 import json
-from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union, AsyncGenerator
 from aioconsole import ainput
 import inspect
 
@@ -77,9 +77,9 @@ class SummonerClient:
         return decorator
 
     def send(self, route: str):
-        def decorator(fn: Callable[[], str]):
-            if not inspect.iscoroutinefunction(fn):
-                raise TypeError(f"Function for route '{route}' must be async")
+        def decorator(fn: Callable[[], AsyncGenerator[str, None]]):
+            if not inspect.isasyncgenfunction(fn):
+                raise TypeError(f"Function for route '{route}' must be an async generator")
             
             # Protect route registration
             async def register():
@@ -87,8 +87,7 @@ class SummonerClient:
                     if route in self.sending_functions:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
                     self.sending_functions[route] = fn
-                    # self.sending_functions.setdefault(route, fn)
-
+            
             self.loop.call_soon_threadsafe(asyncio.create_task, register())
             return fn
         return decorator
@@ -99,17 +98,17 @@ class SummonerClient:
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
                     senders = list(self.sending_functions.values())
-                payloads = await asyncio.gather(*(fn() for fn in senders))
-                for payload in payloads:
-                    if isinstance(payload, str) and payload == "/quit":
-                        stop_event.set()
-                        break
-                    
-                    message = json.dumps(payload) if not isinstance(payload, str) else payload
-                    writer.write(ensure_trailing_newline(message).encode())
-                await writer.drain()
-        except asyncio.CancelledError as e:
-            self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
+                for sender in senders:
+                    async for payload in sender():
+                        if isinstance(payload, str) and payload == "/quit":
+                            stop_event.set()
+                            break
+                        
+                        message = json.dumps(payload) if not isinstance(payload, str) else payload
+                        writer.write(ensure_trailing_newline(message).encode())
+                        await writer.drain()
+        except asyncio.CancelledError:
+            self.logger.info(f"Client about to disconnect...")  # Add new line when using Ctrl + C
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
         try:
