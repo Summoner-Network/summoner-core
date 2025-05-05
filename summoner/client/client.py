@@ -6,6 +6,12 @@ import json
 from typing import Optional, Callable, Union
 from aioconsole import ainput
 import inspect
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey, Ed25519PublicKey
+)
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.exceptions import InvalidSignature
+import hashlib
 
 # Setup path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -153,6 +159,11 @@ class SummonerClient:
             # If self.host and self.port are changed dynamically, then client will travel to corresponding server
             reader, writer = await asyncio.open_connection(host=current_host, port=current_port)
             self.logger.info("Connected to server.")
+            writer.write(ensure_trailing_newline(
+                derive_public_key(
+                    _private_key_from_secret(os.environ["SECRET_KEY"])
+                ).hex()
+            ).encode())
 
             # These two functions run concurrently:
             # - The listener waits for messages from the server and handles disconnection.
@@ -244,3 +255,51 @@ class SummonerClient:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
             self.loop.close()
             self.logger.info("Client exited cleanly.")
+
+def _private_key_from_secret(secret: bytes | str) -> Ed25519PrivateKey:
+    if isinstance(secret, str):
+        secret = secret.encode('utf-8')
+    seed = hashlib.sha256(secret).digest()  # 32-byte seed
+    return Ed25519PrivateKey.from_private_bytes(seed)
+
+def derive_public_key(
+    secret_or_priv: bytes | str | Ed25519PrivateKey
+) -> bytes:
+    """
+    Returns the 32-byte raw Ed25519 public key.
+    Accepts either your original secret (any bytes/str) or an Ed25519PrivateKey.
+    """
+    if isinstance(secret_or_priv, Ed25519PrivateKey):
+        priv = secret_or_priv
+    else:
+        priv = _private_key_from_secret(secret_or_priv)
+    pub: Ed25519PublicKey = priv.public_key()
+    return pub.public_bytes(
+        encoding=Encoding.Raw,
+        format=PublicFormat.Raw
+    )
+
+def sign(message: bytes | str, secret: bytes | str) -> bytes:
+    if isinstance(message, str):
+        message = message.encode('utf-8')
+    priv = _private_key_from_secret(secret)
+    return priv.sign(message)
+
+def verify(
+    message: bytes | str,
+    signature: bytes | str,
+    public_key: bytes | str
+) -> bool:
+    if isinstance(message, str):
+        message = message.encode('utf-8')
+    if isinstance(signature, str):
+        signature = bytes.fromhex(signature)
+    if isinstance(public_key, str):
+        public_key = bytes.fromhex(public_key)
+
+    pub = Ed25519PublicKey.from_public_bytes(public_key)
+    try:
+        pub.verify(signature, message)
+        return True
+    except InvalidSignature:
+        return False
