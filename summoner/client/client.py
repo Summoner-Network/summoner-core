@@ -93,20 +93,22 @@ class SummonerClient:
         return decorator
 
     async def message_sender_loop(self, writer: asyncio.StreamWriter, stop_event: asyncio.Event):
+        async def handle_sender(sender):
+            async for payload in sender():
+                if isinstance(payload, str) and payload == "/quit":
+                    stop_event.set()
+                    break
+                
+                message = json.dumps(payload) if not isinstance(payload, str) else payload
+                writer.write(ensure_trailing_newline(message).encode())
+                await writer.drain()
+
         try:
             while not stop_event.is_set():
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
                     senders = list(self.sending_functions.values())
-                for sender in senders:
-                    async for payload in sender():
-                        if isinstance(payload, str) and payload == "/quit":
-                            stop_event.set()
-                            break
-                        
-                        message = json.dumps(payload) if not isinstance(payload, str) else payload
-                        writer.write(ensure_trailing_newline(message).encode())
-                        await writer.drain()
+                await asyncio.gather(*(handle_sender(sender) for sender in senders))
         except asyncio.CancelledError:
             self.logger.info(f"Client about to disconnect...")  # Add new line when using Ctrl + C
 
