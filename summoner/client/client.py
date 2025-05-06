@@ -52,6 +52,8 @@ class SummonerClient:
         # Protect route registration and access for receive/send functions
         self.receiving_functions = {}
         self.sending_functions = {}
+        self.initial_function = None
+
         self.routes_lock = asyncio.Lock()
 
         # Dynamic routing configuration (can be changed at runtime)
@@ -73,6 +75,16 @@ class SummonerClient:
                     # self.receiving_functions.setdefault(route, fn)
             
             self.loop.call_soon_threadsafe(asyncio.create_task, register())
+            return fn
+        return decorator
+    
+    def init(self):
+        def decorator(fn: Callable[[], None]):
+            if not inspect.iscoroutinefunction(fn):
+                raise TypeError("Initialization function must be async")
+            
+            # Directly assign the initialization function
+            self.initial_function = fn
             return fn
         return decorator
 
@@ -209,6 +221,14 @@ class SummonerClient:
             self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def run_client(self, host='127.0.0.1', port=8888):
+        # Ensure the init function is defined
+        if self.initial_function is None:
+            raise RuntimeError("An initialization function must be defined using @client.init")
+
+        # Call the init function before starting the client
+        self.logger.info("Running initialization function...")
+        await self.initial_function()
+        
         retry_delay = 3
         while True:
             try:
