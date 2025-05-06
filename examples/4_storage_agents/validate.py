@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any, Dict, Tuple, Optional
+import time
 
 def compile_typescript_type(typescript_type: str) -> Dict:
     """
@@ -150,3 +151,10 @@ if __name__ == "__main__":
 
     invalid_json_write = '{"idempotency":123,"context":[{"type":1,"guid":101,"version":1}],"operations":[{"type":1,"guid":"a","version":2,"value":{"key":"value"}}]}'
     print(validate(invalid_json_write, compiled_write))
+
+    start_time = time.time()
+    for _ in range(1000000):
+        validate(valid_json_write, compiled_write)
+    end_time = time.time()
+
+    print(f"Benchmark (1M runs): {end_time - start_time:.4f} seconds")
