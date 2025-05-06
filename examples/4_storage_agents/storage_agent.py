@@ -6,7 +6,7 @@ from summoner.client import SummonerClient
 from aioconsole import ainput
 from valid_ts import compile_typescript_type, validate
 
-TYPES_DIR = "types"
+TYPES_DIR = "./types"
 
 
 def hash_type(ts_content: str) -> int:
@@ -47,9 +47,14 @@ async def load_and_compile_types():
 
     return compiled_types
 
+TYPES = None
 
 if __name__ == "__main__":
     myagent = SummonerClient(name="MyAgent", option="python")
+
+    @myagent.init()
+    async def custom_init():
+        TYPES = await load_and_compile_types()
 
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):
@@ -60,38 +65,24 @@ if __name__ == "__main__":
 
     @myagent.send(route="custom_send")
     async def custom_send():
-        msg = await ainput("s> ")
-        return msg
-    
-    @myagent.init()
-    async def custom_init():
-        print("Hello")
+        input_json = await ainput("Enter JSON to validate: ")
+        type_hash_input = await ainput("Enter type hash: ")
 
-    async def main():
-        compiled_types = await load_and_compile_types()
+        try:
+            type_hash_int = int(type_hash_input)
+        except ValueError:
+            print("Invalid hash. Must be a 128-bit integer.")
+            return
 
-        # Example usage: Validate JSON input dynamically
-        while True:
-            input_json = await ainput("Enter JSON to validate: ")
-            type_hash_input = await ainput("Enter type hash: ")
+        if type_hash_int not in TYPES:
+            print("Type hash not found.")
+            return
 
-            try:
-                type_hash_int = int(type_hash_input)
-            except ValueError:
-                print("Invalid hash. Must be a 128-bit integer.")
-                continue
+        valid, error = validate(input_json, TYPES[type_hash_int])
 
-            if type_hash_int not in compiled_types:
-                print("Type hash not found.")
-                continue
+        if valid:
+            print("Valid JSON.")
+        else:
+            print(f"Invalid JSON: {error}")
 
-            valid, error = validate(input_json, compiled_types[type_hash_int])
-
-            if valid:
-                print("Valid JSON.")
-            else:
-                print(f"Invalid JSON: {error}")
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
     myagent.run(host="127.0.0.1", port=8888)
