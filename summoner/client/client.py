@@ -60,8 +60,8 @@ class SummonerClient:
         self.connection_lock = asyncio.Lock()  # Protect host/port updates
 
     def receive(self, route: str):
-        def decorator(fn: Callable[[Union[str, dict]], None]):
-            if not inspect.iscoroutinefunction(fn):
+        def decorator(fn: Optional[Callable[[Union[str, dict]], None]]):
+            if fn is not None and not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"Function for route '{route}' must be async")
             
             # Protect route registration
@@ -70,15 +70,14 @@ class SummonerClient:
                     if route in self.receiving_functions:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
                     self.receiving_functions[route] = fn
-                    # self.receiving_functions.setdefault(route, fn)
             
             self.loop.call_soon_threadsafe(asyncio.create_task, register())
             return fn
         return decorator
 
     def send(self, route: str):
-        def decorator(fn: Callable[[], str]):
-            if not inspect.iscoroutinefunction(fn):
+        def decorator(fn: Optional[Callable[[], str]]):
+            if fn is not None and not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"Function for route '{route}' must be async")
             
             # Protect route registration
@@ -87,7 +86,6 @@ class SummonerClient:
                     if route in self.sending_functions:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
                     self.sending_functions[route] = fn
-                    # self.sending_functions.setdefault(route, fn)
 
             self.loop.call_soon_threadsafe(asyncio.create_task, register())
             return fn
@@ -99,7 +97,10 @@ class SummonerClient:
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
                     senders = list(self.sending_functions.values())
-                payloads = await asyncio.gather(*(fn() for fn in senders))
+                if not senders:
+                    await asyncio.sleep(0.1)  # Prevent busy-waiting if no senders are registered
+                    continue
+                payloads = await asyncio.gather(*(fn() for fn in senders if fn is not None))
                 for payload in payloads:
                     if isinstance(payload, str) and payload == "/quit":
                         stop_event.set()
@@ -108,26 +109,28 @@ class SummonerClient:
                     message = json.dumps(payload) if not isinstance(payload, str) else payload
                     writer.write(ensure_trailing_newline(message).encode())
                 await writer.drain()
-        except asyncio.CancelledError as e:
-            self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
+        except asyncio.CancelledError:
+            self.logger.info("Client about to disconnect...")
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
         try:
-            # Snapshot receiving functions to avoid lock during iteration
-            async with self.routes_lock:
-                receivers = list(self.receiving_functions.values())
-            while True:
+            while not stop_event.is_set():
+                # Snapshot receiving functions to avoid lock during iteration
+                async with self.routes_lock:
+                    receivers = list(self.receiving_functions.values())
+                if not receivers:
+                    await asyncio.sleep(0.1)  # Prevent busy-waiting if no receivers are registered
+                    continue
                 data = await reader.readline()
                 if not data:
                     raise ServerDisconnected("Server closed the connection.")
                 
                 try:
-                    # payload = json.loads(data.decode())
                     payload = fully_recover_json(data.decode())
                 except:
                     payload = remove_last_newline(data.decode())
 
-                await asyncio.gather(*(fn(payload) for fn in receivers))
+                await asyncio.gather(*(fn(payload) for fn in receivers if fn is not None))
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
             raise
