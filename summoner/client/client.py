@@ -6,6 +6,7 @@ import json
 from typing import Optional, Callable, Union
 from aioconsole import ainput
 import inspect
+from asyncio import Queue  # Add Queue for thread-safe payload handling
 
 # Setup path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +60,10 @@ class SummonerClient:
         self.port: Optional[int] = None
         self.connection_lock = asyncio.Lock()  # Protect host/port updates
 
+        self.send_queue = Queue()  # Thread-safe queue for immediate payloads
+        self.queue_task: Optional[asyncio.Task] = None  # Task for draining the queue
+        self.queue_stop_event = asyncio.Event()  # Event to stop the queue task
+
     def init(self):
         def decorator(fn: Optional[Callable[[], None]]):
             if fn is not None and not inspect.iscoroutinefunction(fn):
@@ -104,7 +109,32 @@ class SummonerClient:
             return fn
         return decorator
 
+    async def reply(self, payload: Union[str, dict]):
+        """Add a payload to the send queue for immediate processing."""
+        message = json.dumps(payload) if not isinstance(payload, str) else payload
+        await self.send_queue.put(ensure_trailing_newline(message))
+
+    async def queue_drain_loop(self, writer: asyncio.StreamWriter):
+        """Dedicated loop to drain the send queue and send messages."""
+        try:
+            while not self.queue_stop_event.is_set():
+                batch = []
+                while not self.send_queue.empty():
+                    batch.append(await self.send_queue.get())
+
+                if batch:
+                    writer.write("".join(batch).encode())
+                    await writer.drain()
+
+                # Prevent busy-waiting if the queue is empty
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            self.logger.info("Queue drain loop cancelled.")
+        except Exception as e:
+            self.logger.error(f"Error in queue drain loop: {e}")
+
     async def message_sender_loop(self, writer: asyncio.StreamWriter, stop_event: asyncio.Event):
+        """Handles sending messages from registered sending functions."""
         try:
             active_generators = {}
             while not stop_event.is_set():
@@ -138,7 +168,7 @@ class SummonerClient:
                     await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
-            self.logger.info("Client about to disconnect...")
+            self.logger.info("Sender loop cancelled.")
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
         try:
@@ -164,66 +194,58 @@ class SummonerClient:
             raise
                 
     async def handle_session(self, host='127.0.0.1', port=8888):
-        # Run listener and sender concurrently; whichever exits first (due to disconnect or /quit)
-        # triggers session termination. The remaining task is cancelled.
-
-        # Shared flag between the two tasks to signal coordinated session termination
+        """Handles a single client-server session."""
         stop_event = asyncio.Event()
 
         while True:
-            # Register this session's task so it can be cancelled during shutdown
             task = asyncio.current_task()
             async with self.tasks_lock:
                 self.active_tasks.add(task)
 
-            # Use lock when accessing dynamic routing information
             async with self.connection_lock:
                 current_host = self.host or host
                 current_port = self.port or port
 
-            # If self.host and self.port are changed dynamically, then client will travel to corresponding server
             reader, writer = await asyncio.open_connection(host=current_host, port=current_port)
             self.logger.info("Connected to server.")
 
-            # These two functions run concurrently:
-            # - The listener waits for messages from the server and handles disconnection.
-            # - The sender waits for client input and handles /quit.
-            # Either of them may call stop_event.set(), which signals a shutdown.
-            # Once one completes, the other is cancelled and the connection is closed.
+            # Start the queue drain loop
+            self.queue_stop_event.clear()
+            self.queue_task = asyncio.create_task(self.queue_drain_loop(writer))
+
             listen_task = asyncio.create_task(self.message_listener_loop(reader, stop_event))
             sender_task = asyncio.create_task(self.message_sender_loop(writer, stop_event))
 
-            # Wait until either the listener or sender finishes — the first to complete wins
             done, pending = await asyncio.wait(
                 {listen_task, sender_task},
                 return_when=asyncio.FIRST_COMPLETED
             )
 
-            # Cancel the task that did not complete
             for task in pending:
                 task.cancel()
 
-            # Await the completed task (to raise any exceptions or finalize resources)
             for task in done:
                 try:
                     await task
                 except ServerDisconnected as e:
-                    # Propagate server-side disconnection to the reconnection handler
                     raise ServerDisconnected(e)
                 except asyncio.CancelledError:
-                    # Normal during shutdown; ignore
                     pass
 
-            # Cleanly close the connection
+            # Stop and clean up the queue drain loop
+            self.queue_stop_event.set()
+            if self.queue_task:
+                self.queue_task.cancel()
+                await self.queue_task
+                self.queue_task = None
+
             writer.close()
             await writer.wait_closed()
             self.logger.info("Disconnected from server.")
 
-            # Deregister this session task from active list
             async with self.tasks_lock:
                 self.active_tasks.discard(task)
 
-            # Check whether we should continue to the next server (agent migration)
             async with self.connection_lock:
                 if self.host is None or self.port is None:
                     break
