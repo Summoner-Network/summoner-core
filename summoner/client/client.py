@@ -59,6 +59,19 @@ class SummonerClient:
         self.port: Optional[int] = None
         self.connection_lock = asyncio.Lock()  # Protect host/port updates
 
+    def init(self):
+        def decorator(fn: Optional[Callable[[], None]]):
+            if fn is not None and not inspect.iscoroutinefunction(fn):
+                raise TypeError("Initialization function must be async")
+            
+            # Register the initialization function
+            async def register():
+                self.init_function = fn
+            
+            self.loop.call_soon_threadsafe(asyncio.create_task, register())
+            return fn
+        return decorator
+
     def receive(self, route: str):
         def decorator(fn: Optional[Callable[[Union[str, dict]], None]]):
             if fn is not None and not inspect.iscoroutinefunction(fn):
@@ -227,6 +240,10 @@ class SummonerClient:
             self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def run_client(self, host='127.0.0.1', port=8888):
+        # Call the initialization function if it exists
+        if hasattr(self, 'init_function') and self.init_function is not None:
+            await self.init_function()
+
         retry_delay = 3
         while True:
             try:

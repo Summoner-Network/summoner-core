@@ -49,6 +49,10 @@ if __name__ == "__main__":
         state_lock = asyncio.Lock()
         history_lock = asyncio.Lock()
 
+        @agent.init()
+        async def init():
+            print(f"\033[92m[{agent.name}] Agent initialized!\033[0m")
+
         @agent.receive(route="offer_response")
         async def handle_seller_response(msg):
             content = msg["content"]
