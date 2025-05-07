@@ -119,15 +119,16 @@ class SummonerClient:
         try:
             while not self.queue_stop_event.is_set():
                 batch = []
+                if self.send_queue.empty():
+                    # Prevent busy-waiting if the queue is empty
+                    await asyncio.sleep(0.01)
                 while not self.send_queue.empty():
                     batch.append(await self.send_queue.get())
-
                 if batch:
                     writer.write("".join(batch).encode())
                     await writer.drain()
 
-                # Prevent busy-waiting if the queue is empty
-                await asyncio.sleep(0.1)
+                
         except asyncio.CancelledError:
             self.logger.info("Queue drain loop cancelled.")
         except Exception as e:
