@@ -232,7 +232,7 @@ class SummonerClient:
 
             # Wait until either the listener or sender finishes — the first to complete wins
             done, pending = await asyncio.wait(
-                {listen_task, sender_task},
+                {listen_task, sender_task, self.queue_task},
                 return_when=asyncio.FIRST_COMPLETED
             )
 
