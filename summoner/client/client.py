@@ -77,8 +77,8 @@ class SummonerClient:
 
     def send(self, route: str):
         def decorator(fn: Optional[Callable[[], str]]):
-            if fn is not None and not inspect.iscoroutinefunction(fn):
-                raise TypeError(f"Function for route '{route}' must be async")
+            if fn is not None and not inspect.isasyncgenfunction(fn):
+                raise TypeError(f"Function for route '{route}' must be an async generator")
             
             # Protect route registration
             async def register():
@@ -93,22 +93,41 @@ class SummonerClient:
 
     async def message_sender_loop(self, writer: asyncio.StreamWriter, stop_event: asyncio.Event):
         try:
+            active_generators = {}
             while not stop_event.is_set():
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
-                    senders = list(self.sending_functions.values())
-                if not senders:
-                    await asyncio.sleep(0.1)  # Prevent busy-waiting if no senders are registered
+                    for route, gen_fn in self.sending_functions.items():
+                        if route not in active_generators:
+                            active_generators[route] = gen_fn()
+
+                # Collect messages from all active generators
+                tasks = [
+                    asyncio.create_task(gen.__anext__(), name=route)
+                    for route, gen in active_generators.items()
+                ]
+                if not tasks:
+                    await asyncio.sleep(0.1)  # Prevent busy-waiting if no generators are active
                     continue
-                payloads = await asyncio.gather(*(fn() for fn in senders if fn is not None))
-                for payload in payloads:
-                    if isinstance(payload, str) and payload == "/quit":
-                        stop_event.set()
-                        break
-                    
-                    message = json.dumps(payload) if not isinstance(payload, str) else payload
-                    writer.write(ensure_trailing_newline(message).encode())
+
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                # Process completed tasks
+                for task in done:
+                    route = task.get_name()
+                    try:
+                        payload = task.result()
+                        message = json.dumps(payload) if not isinstance(payload, str) else payload
+                        writer.write(ensure_trailing_newline(message).encode())
+                    except StopAsyncIteration:
+                        # Remove completed generator
+                        active_generators.pop(route, None)
+                    except Exception as e:
+                        self.logger.error(f"Error in generator for route '{route}': {e}")
+
+                # Drain the writer after processing all completed tasks
                 await writer.drain()
+
         except asyncio.CancelledError:
             self.logger.info("Client about to disconnect...")
 
