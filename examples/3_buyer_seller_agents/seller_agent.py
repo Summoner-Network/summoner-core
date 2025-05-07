@@ -125,18 +125,18 @@ if __name__ == "__main__":
 
             if decision == "interested":
                 print(f"\033[96m[{agent.name}] Interested in offer: {offer}\033[0m")
-                return {"status": "interested", "price": offer}
+                yield {"status": "interested", "price": offer}
             elif decision == "accept":
                 print(f"\033[92m[{agent.name}] Accepted offer: {offer}\033[0m")
-                return {"status": "accept", "price": offer}
+                yield {"status": "accept", "price": offer}
             elif decision == "refuse":
                 print(f"\033[91m[{agent.name}] Refused offer: {offer}\033[0m")
-                return {"status": "refuse", "price": offer}
+                yield {"status": "refuse", "price": offer}
             elif in_talk:
                 print(f"\033[93m[{agent.name}] Offering price: {offer}\033[0m")
-                return {"status": "offer", "price": offer}
+                yield {"status": "offer", "price": offer}
             else:
-                return {"status": "waiting"}
+                yield {"status": "waiting"}
                 
         agent.loop.create_task(negotiation(agent))
 

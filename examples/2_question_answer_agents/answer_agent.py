@@ -30,7 +30,8 @@ if __name__ == "__main__":
         async with track_lock:
             for k, q in track_questions.items():
                 del track_questions[k]
-                return ANSWERS[q]
-        return "waiting"
+                yield ANSWERS[q]
+                return
+        yield "waiting"
 
     agent.run(host="127.0.0.1", port=8888)
