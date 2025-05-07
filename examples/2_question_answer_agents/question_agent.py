@@ -27,6 +27,6 @@ if __name__ == "__main__":
     @agent.send(route="")
     async def send_question():
         await asyncio.sleep(2)
-        return QUESTIONS[tracker["count"] % len(QUESTIONS)]
+        yield QUESTIONS[tracker["count"] % len(QUESTIONS)]
 
     agent.run(host="127.0.0.1", port=8888)

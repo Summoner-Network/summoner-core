@@ -16,6 +16,6 @@ if __name__ == "__main__":
     @myagent.send(route="custom_send")
     async def custom_send():
         msg = await ainput("s> ")
-        return msg
+        yield msg
 
     myagent.run(host = "127.0.0.1", port = 8888)
