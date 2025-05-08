@@ -55,8 +55,9 @@ if __name__ == "__main__":
             print(f"[Received] {content}")
             
             async with state_lock:
-                renew = content["status"] in ["offer"] and state["agreement"] in ["accept","refuse"]
-                if renew:
+                renew1 = content["status"] in ["offer", "interested"] and state["agreement"] in ["accept_too", "refuse_too"]
+                renew2 = content["status"] in ["offer"] and state["agreement"] in ["accept", "refuse"]
+                if renew1 or renew2:
                     state["agreement"] = "none"
                     state["negotiation_active"] = False
                     await asyncio.sleep(1)
@@ -83,35 +84,35 @@ if __name__ == "__main__":
                         state["agreement"] = "refuse"
                         print(f"\033[90m[{agent.name}] Refusing offer at price {offer}!\033[0m")
 
-            if content["status"] == "accept":
+            if content["status"][:len("accept")] == "accept":
                 async with state_lock:
-                    if state["agreement"] == "accept":
+                    if content["status"] == "accept_too" and state["agreement"] == "accept":
                         async with history_lock:
                             history.append(1)
                         await show_statistics(agent)
                         state["agreement"] = "none"
                         state["negotiation_active"] = False
-                    elif state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
+                    elif content["status"] == "accept" and state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
                         async with history_lock:
                             history.append(1)
                         await show_statistics(agent)
-                        state["agreement"] = "accept"
+                        state["agreement"] = "accept_too"
                     else:
                         state["agreement"] = "none"
    
-            if content["status"] == "refuse":
+            if content["status"][:len("refuse")] == "refuse":
                 async with state_lock:
-                    if state["agreement"] == "refuse":
+                    if content["status"] == "refuse_too" and state["agreement"] == "refuse":
                         async with history_lock:
                             history.append(0)
                         await show_statistics(agent)
                         state["agreement"] = "none"
                         state["negotiation_active"] = False
-                    elif state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
+                    elif content["status"] == "refuse" and state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
                         async with history_lock:
                             history.append(0)
                         await show_statistics(agent)
-                        state["agreement"] = "refuse"
+                        state["agreement"] = "refuse_too"
                     else:
                         state["agreement"] = "none"
 
@@ -126,12 +127,12 @@ if __name__ == "__main__":
             if decision == "interested":
                 print(f"\033[96m[{agent.name}] Interested in offer: {offer}\033[0m")
                 return {"status": "interested", "price": offer}
-            elif decision == "accept":
+            elif decision[:len("accept")] == "accept":
                 print(f"\033[92m[{agent.name}] Accepted offer: {offer}\033[0m")
-                return {"status": "accept", "price": offer}
-            elif decision == "refuse":
+                return {"status": decision, "price": offer}
+            elif decision[:len("refuse")] == "refuse":
                 print(f"\033[91m[{agent.name}] Refused offer: {offer}\033[0m")
-                return {"status": "refuse", "price": offer}
+                return {"status": decision, "price": offer}
             else:
                 print(f"\033[93m[{agent.name}] Offering price: {offer}\033[0m")
                 return {"status": "offer", "price": offer}

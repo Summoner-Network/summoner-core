@@ -2,6 +2,9 @@ import os
 import sys
 import asyncio
 import random
+from pathlib import Path
+from datetime import datetime
+import aiosqlite
 from summoner.client import SummonerClient
 
 state = {
@@ -13,13 +16,50 @@ state = {
 }
 
 state_lock = None
-history = []
-history_lock = None
+
+def get_db_path():
+    agent_dir = Path(__file__).resolve().parent
+    return agent_dir / "negotiation_history.db"
+
+def reset_db():
+    db_path = get_db_path()
+    if db_path.exists():
+        db_path.unlink()
+
+async def init_db():
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                success INTEGER NOT NULL CHECK (success IN (0, 1)),
+                timestamp TEXT NOT NULL
+            )
+        """)
+        await db.commit()
+
+async def add_history(success: int):
+    db_path = get_db_path()
+    timestamp = datetime.now().isoformat()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "INSERT INTO history (success, timestamp) VALUES (?, ?)",
+            (success, timestamp)
+        )
+        await db.commit()
+
+async def get_statistics():
+    db_path = get_db_path()
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT COUNT(*) FROM history WHERE success = 1") as cursor:
+            success_num = (await cursor.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM history") as cursor:
+            total = (await cursor.fetchone())[0]
+    return success_num, total
 
 async def show_statistics(self: SummonerClient):
-    async with history_lock:
-        success_num = sum(history)
-        total = len(history)
+    success_num, total = await get_statistics()
     success_rate = (success_num / total) * 100 if total else 0
     print(f"\n\033[96m[{self.name}] Negotiation success rate: {success_rate:.2f}% ({success_num} successes / {total} total)\033[0m")
 
@@ -43,9 +83,10 @@ if __name__ == "__main__":
     agent = SummonerClient(name="SellerAgent", option="python")
 
     async def setup():
-        global state_lock, history_lock
+        global state_lock
         state_lock = asyncio.Lock()
-        history_lock = asyncio.Lock()
+        reset_db()           
+        await init_db()      
 
         @agent.receive(route="buyer_offer")
         async def handle_buyer_offer(msg):
@@ -85,40 +126,35 @@ if __name__ == "__main__":
             if content["status"][:len("accept")] == "accept":
                 async with state_lock:
                     if content["status"] == "accept_too" and state["agreement"] == "accept":
-                        async with history_lock:
-                            history.append(1)
+                        await add_history(1)
                         await show_statistics(agent)
                         state["agreement"] = "none"
                         state["negotiation_active"] = False
-                    elif content["status"] == "accept" and state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
-                        async with history_lock:
-                            history.append(1)
+                    elif content["status"] == "accept" and state["agreement"] == "interested" and content['price'] == state["current_offer"]:
+                        await add_history(1)
                         await show_statistics(agent)
                         state["agreement"] = "accept_too"
                     else:
                         state["agreement"] = "none"
-   
+
             if content["status"][:len("refuse")] == "refuse":
                 async with state_lock:
                     if content["status"] == "refuse_too" and state["agreement"] == "refuse":
-                        async with history_lock:
-                            history.append(0)
+                        await add_history(0)
                         await show_statistics(agent)
                         state["agreement"] = "none"
                         state["negotiation_active"] = False
-                    elif content["status"] == "refuse" and state["agreement"] == "interested" and content['price'] == state["current_offer"]: #check it is same transaction
-                        async with history_lock:
-                            history.append(0)
+                    elif content["status"] == "refuse" and state["agreement"] == "interested" and content['price'] == state["current_offer"]:
+                        await add_history(0)
                         await show_statistics(agent)
                         state["agreement"] = "refuse_too"
                     else:
                         state["agreement"] = "none"
 
-
         @agent.send(route="offer_response")
         async def respond_to_offer():
             await asyncio.sleep(3)
-            
+
             async with state_lock:
                 offer = state["current_offer"]
                 decision = state["agreement"]
@@ -138,7 +174,7 @@ if __name__ == "__main__":
                 return {"status": "offer", "price": offer}
             else:
                 return {"status": "waiting"}
-                
+
         agent.loop.create_task(negotiation(agent))
 
     agent.loop.run_until_complete(setup())
