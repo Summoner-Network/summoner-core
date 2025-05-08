@@ -16,10 +16,13 @@ if __name__ == "__main__":
 
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):
-        msg = (msg["content"] if isinstance(msg, dict) else msg) 
-        payload = msg.get("payload", None)
-        public_key = msg.get("public_key", None)
-        print(f"{public_key}> {payload}")
+        msg = (msg["content"] if isinstance(msg, dict) else msg)
+        if all(key in msg for key in ["payload", "public_key", "signature"]):
+            payload = msg.get("payload", None)
+            public_key = msg.get("public_key", None)
+            print(f"{public_key}> {payload}")
+        else:
+            print(f"anonymous> {msg}")
                 
 
     @myagent.send(route="custom_send")
