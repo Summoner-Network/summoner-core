@@ -17,9 +17,6 @@ if __name__ == "__main__":
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):
         msg = (msg["content"] if isinstance(msg, dict) else msg) 
-        """
-        Handle "join" function according to JSON-RPC 2.0
-        """
         payload = msg.get("payload", None)
         public_key = msg.get("public_key", None)
         print(f"{public_key}> {payload}")
