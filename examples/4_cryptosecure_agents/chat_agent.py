@@ -21,17 +21,9 @@ if __name__ == "__main__":
         Handle "join" function according to JSON-RPC 2.0
         """
         payload = msg.get("payload", None)
-        signature = msg.get("signature", None)
         public_key = msg.get("public_key", None)
-        if signature and not public_key:
-            return
-        elif public_key and not signature:
-            return
-        elif signature and public_key:
-            if not verify(public_key, payload, signature):
-                return
-            else:
-                print(f"{public_key}> {payload}")
+        print(f"{public_key}> {payload}")
+                
 
     @myagent.send(route="custom_send")
     async def custom_send():

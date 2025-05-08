@@ -201,6 +201,25 @@ class SummonerClient:
                     payload = fully_recover_json(data.decode())
                 except:
                     payload = remove_last_newline(data.decode())
+                
+                # Verify message structure
+                payload_content = payload["content"]
+                if isinstance(payload_content, dict) and all(key in payload_content for key in ["payload", "public_key", "signature"]):
+                    try:
+                        is_valid = verify(
+                            payload_content["public_key"],
+                            payload_content["payload"],
+                            payload_content["signature"]
+                        )
+                        if not is_valid:
+                            self.logger.warning("Received message with invalid signature. Discarding.")
+                            continue
+                    except Exception as e:
+                        self.logger.error(f"Error during message verification: {e}")
+                        continue
+                else:
+                    self.logger.warning("Received message with invalid structure. Discarding.")
+                    continue
 
                 await asyncio.gather(*(fn(payload) for fn in receivers))
         except (ServerDisconnected, asyncio.CancelledError):
