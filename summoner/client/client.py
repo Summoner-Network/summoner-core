@@ -6,6 +6,11 @@ import json
 from typing import Optional, Callable, Union
 from aioconsole import ainput
 import inspect
+import base64
+from nacl.signing import SigningKey
+from nacl.encoding import RawEncoder
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
 
 # Setup path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +36,13 @@ class SummonerClient:
     # __slots__: tuple[str, ...] = (
     # )
 
-    def __init__(self, name: Optional[str] = None, option: Optional[str] = None):
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        option: Optional[str] = None,
+        secret: Optional[Callable[[], Optional[str]]] = None
+    ):
+        self.secret = secret
         
         # Can be "python" or "rust"
         self.option = option or "python"
@@ -59,6 +70,59 @@ class SummonerClient:
         self.port: Optional[int] = None
         self.connection_lock = asyncio.Lock()  # Protect host/port updates
 
+    def derive_public_key(self) -> Optional[str]:
+        """
+        Derives the Ed25519 public key from the agent's private key.
+
+        Returns:
+            A base64-encoded public key string, or None if no secret is set.
+        """
+        if not self.secret:
+            self.logger.warning("No get_secret_key function provided.")
+            return None
+
+        secret_b64 = self.secret()
+        if not secret_b64:
+            self.logger.warning("No secret key available.")
+            return None
+
+        try:
+            secret_bytes = base64.b64decode(secret_b64)
+            signing_key = SigningKey(secret_bytes)
+            verify_key = signing_key.verify_key
+            return base64.b64encode(verify_key.encode(RawEncoder)).decode()
+        except Exception as e:
+            self.logger.error(f"Failed to derive public key: {e}")
+            return None
+    
+    def sign(self, message: str) -> Optional[str]:
+        """
+        Signs a message using the Ed25519 private key.
+
+        Args:
+            message: The message to sign.
+
+        Returns:
+            A base64-encoded signature, or None if signing fails.
+        """
+        if not self.secret:
+            self.logger.warning("No get_secret_key function provided.")
+            return None
+
+        secret_b64 = self.secret()
+        if not secret_b64:
+            self.logger.warning("No secret key available.")
+            return None
+
+        try:
+            secret_bytes = base64.b64decode(secret_b64)
+            signing_key = SigningKey(secret_bytes)
+            signature = signing_key.sign(message.encode(), encoder=RawEncoder).signature
+            return base64.b64encode(signature).decode()
+        except Exception as e:
+            self.logger.error(f"Failed to sign message: {e}")
+            return None
+        
     def receive(self, route: str):
         def decorator(fn: Callable[[Union[str, dict]], None]):
             if not inspect.iscoroutinefunction(fn):
@@ -104,12 +168,23 @@ class SummonerClient:
                     if isinstance(payload, str) and payload == "/quit":
                         stop_event.set()
                         break
-                    
+
+                    if self.secret:
+                        serialized_payload = json.dumps(payload) if not isinstance(payload, str) else payload
+                        public_key = self.derive_public_key()
+                        signature = self.sign(serialized_payload)
+                        if public_key and signature:
+                            payload = {
+                                "payload": serialized_payload,
+                                "public_key": public_key,
+                                "signature": signature,
+                            }
+
                     message = json.dumps(payload) if not isinstance(payload, str) else payload
                     writer.write(ensure_trailing_newline(message).encode())
                 await writer.drain()
         except asyncio.CancelledError as e:
-            self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
+            self.logger.info(f"Client about to disconnect...")  # add new line when using Ctrl + C
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
         try:
@@ -244,3 +319,36 @@ class SummonerClient:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
             self.loop.close()
             self.logger.info("Client exited cleanly.")
+
+def verify(public_key_b64: str, message: str, signature_b64: str) -> bool:
+    """
+    Verifies a message against a base64-encoded Ed25519 public key and signature.
+
+    Args:
+        public_key_b64: The base64-encoded Ed25519 public key.
+        message: The original message string.
+        signature_b64: The base64-encoded signature.
+
+    Returns:
+        True if the signature is valid, False otherwise.
+    """
+    try:
+        public_key_bytes = base64.b64decode(public_key_b64)
+        signature_bytes = base64.b64decode(signature_b64)
+
+        verify_key = VerifyKey(public_key_bytes)
+        serialized = json.dumps(message) if not isinstance(message, str) else message
+        verify_key.verify(serialized.encode(), signature_bytes)
+        return True
+    except (BadSignatureError, ValueError, TypeError) as e:
+        return False
+
+def generate_secret_key() -> str:
+    """
+    Generates a new Ed25519 private key and returns it base64-encoded.
+
+    Returns:
+        A base64-encoded 32-byte secret key.
+    """
+    signing_key = SigningKey.generate()
+    return base64.b64encode(signing_key.encode()).decode()
