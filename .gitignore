@@ -4,7 +4,7 @@ experiments/
 .DS_Store
 *.log.[1-9]
 *.mov
-negotiation_history.db
+examples/demo_seller_agent/negotiation_history.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
