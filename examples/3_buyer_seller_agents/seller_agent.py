@@ -49,6 +49,10 @@ if __name__ == "__main__":
 
         @agent.receive(route="buyer_offer")
         async def handle_buyer_offer(msg):
+            
+             # ── ignore anything that isn't the JSON object we expect ──
+            if not isinstance(msg, dict) or "content" not in msg:
+                return
             content = msg["content"]
             print(f"[Received] {content}")
 
