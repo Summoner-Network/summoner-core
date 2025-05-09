@@ -253,7 +253,7 @@ class SummonerClient:
                 current_port = self.port or port
 
             # If self.host and self.port are changed dynamically, then client will travel to corresponding server
-            reader, writer = await asyncio.open_connection(host=current_host, port=current_port)
+            reader, writer = await asyncio.open_connection(host=current_host, port=current_port, limit=2**20)
             self.logger.info("Connected to server.")
 
             # These two functions run concurrently:
