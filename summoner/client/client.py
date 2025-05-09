@@ -3,7 +3,7 @@ import signal
 import os
 import sys
 import json
-from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union, Any, List
 from aioconsole import ainput
 import inspect
 import base64
@@ -11,6 +11,8 @@ from nacl.signing import SigningKey
 from nacl.encoding import RawEncoder
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
+import resource
+from lupa import LuaRuntime
 
 # Setup path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -204,7 +206,11 @@ class SummonerClient:
                 
                 # Verify message structure
                 payload_content = payload["content"]
-                if isinstance(payload_content, dict) and all(key in payload_content for key in ["payload", "public_key", "signature"]):
+                if (
+                    isinstance(payload_content, dict)
+                    and any(key in payload_content for key in ["payload", "public_key", "signature"])
+                    and all(key in payload_content for key in ["payload", "public_key", "signature"])
+                ):
                     try:
                         is_valid = verify(
                             payload_content["public_key"],
@@ -217,7 +223,7 @@ class SummonerClient:
                     except Exception as e:
                         self.logger.error(f"Error during message verification: {e}")
                         continue
-                else:
+                elif (any(key in payload_content for key in ["payload", "public_key", "signature"])):
                     self.logger.warning("Received message with invalid structure. Discarding.")
                     continue
 
