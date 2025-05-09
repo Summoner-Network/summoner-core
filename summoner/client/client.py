@@ -198,14 +198,16 @@ class SummonerClient:
                 if not data:
                     raise ServerDisconnected("Server closed the connection.")
                 
+                payload_content = None
                 try:
                     # payload = json.loads(data.decode())
                     payload = fully_recover_json(data.decode())
+                    payload_content = payload["content"]
                 except:
                     payload = remove_last_newline(data.decode())
+                    payload_content = payload
                 
                 # Verify message structure
-                payload_content = payload["content"]
                 if (
                     isinstance(payload_content, dict)
                     and any(key in payload_content for key in ["payload", "public_key", "signature"])
