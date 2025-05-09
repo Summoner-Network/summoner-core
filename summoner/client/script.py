@@ -14,51 +14,61 @@ class OutOfMemoryError(RuntimeError):
     pass
 
 class LuaScriptRunner:
-    """
-    Isolated runner for LuaJIT scripts with gas (instr count) and memory (KB) metering,
-    offering an async API.
-    """
-
     def __init__(
         self,
         max_memory_kb: int = 10_240,
         instr_hook_period: int = 1000,
         timeout_s: Optional[float] = 40.0,
     ):
-        """
-        :param max_instructions: total instruction “gas” per script
-        :param max_memory_kb: Lua GC heap limit in KB
-        :param instr_hook_period: how often (VM ops) to invoke the hook
-        :param timeout_s: optional wall-clock timeout in seconds
-        :param enforce_rllimit: if True, set RLIMIT_AS to cap total process memory
-        """
         self.max_memory_kb = max_memory_kb
         self.instr_hook_period = instr_hook_period
         self.timeout_s = timeout_s
 
     def _make_runtime(self) -> lua52.LuaRuntime:
-        lua = lua52.LuaRuntime(max_memory=self.max_memory_kb * 1024)
+        lua = lua52.LuaRuntime(unpack_returned_tuples=True, register_eval=False)
 
-        # Inject the HTTP hook
-        lua.globals()["http_request"] = http_request
-        
-        # Tune JIT: only compile loops seen more than 8 times
-        lua.execute("""
-            if jit and jit.opt then
-                jit.opt.start('hotloop=8')
-            end
-        """)
+        # Inject safe global functions into the sandbox env only — not globals
+        lua.globals()["load_sandboxed"] = lambda code, env: lua.globals().load(code, "sandbox", "t", env)
+
         return lua
+
+    def _make_sandbox_env(self, lua):
+        env = lua.table()
+
+        safe_builtins = [
+            "assert", "error", "ipairs", "next", "pairs", "pcall", "select",
+            "tonumber", "tostring", "type", "xpcall", "print"
+        ]
+        for name in safe_builtins:
+            env[name] = lua.globals()[name]
+
+        for lib in ["math", "string", "table", "utf8"]:
+            env[lib] = lua.globals()[lib]
+
+        # Your approved helper
+        env["http_request"] = http_request
+
+        # Optional: make 'print' safer or redirectable
+        env["print"] = lambda *args: print("[sandbox]", *args)
+
+        return env
 
     def _sync_run(
         self,
         script: str,
-        init_args: List[Any],
-        case: str,
-        case_args: List[Any]
+        tool_args: List[Any]
     ) -> Any:
         lua = self._make_runtime()
-        return lua.execute(script, *init_args)(*case_args)
+        env = self._make_sandbox_env(lua)
+
+        # Load script in sandbox
+        chunk_loader = lua.globals().load(script, "sandboxed", "t", env)
+        loaded_chunk = chunk_loader()
+
+        if not callable(loaded_chunk):
+            raise TypeError("Lua script did not return a function.")
+
+        return loaded_chunk(*tool_args)
 
     async def run(
         self,
@@ -67,17 +77,10 @@ class LuaScriptRunner:
         case: Optional[str] = None,
         case_args: Optional[List[Any]] = None
     ) -> Any:
-        """
-        Async execution of Lua script under gas/memory/timeout limits.
-        Raises OutOfGasError, OutOfMemoryError, or asyncio.TimeoutError.
-        """
         loop = asyncio.get_running_loop()
-        # offload the blocking _sync_run to a thread
-        fut = loop.run_in_executor(None, self._sync_run, script, init_args, case, case_args)
-        if self.timeout_s is not None:
-            return await asyncio.wait_for(fut, timeout=self.timeout_s)
-        else:
-            return await fut
+        fut = loop.run_in_executor(None, self._sync_run, script, init_args, case, case_args or [])
+        return await asyncio.wait_for(fut, timeout=self.timeout_s)
+
         
 def _lua_table_to_dict(obj):
     return {k: obj[k] for k in obj} if hasattr(obj, "__len__") and hasattr(obj, "__getitem__") else {}
