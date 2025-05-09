@@ -3,6 +3,7 @@ import sys
 from summoner.client import SummonerClient
 from summoner.client import LuaScriptRunner, evolve_html
 from aioconsole import ainput
+import asyncio
 
 RUNNER = LuaScriptRunner()
 
@@ -36,14 +37,14 @@ def write_string_to_file(filepath, content):
 
 fetch_tool = load_file_to_string("fetch.lua")
 
+TOOLS = {"public_key": {"tool": "code"}}
+
 if __name__ == "__main__":
     myagent = SummonerClient(name="MyAgent", option = "python")
 
     @myagent.send(route="custom_send")
     async def custom_send():
-        msg = await ainput("s> ")
-        out = await RUNNER.run(fetch_tool, [], "", [f"https://{msg}"])
-        write_string_to_file(f"{msg}.html", out)
-        return msg
+        asyncio.sleep(1)
+        return {"fetch": load_file_to_string("fetch.lua")}
 
     myagent.run(host = "127.0.0.1", port = 8888)
