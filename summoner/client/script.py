@@ -4,6 +4,7 @@ from lupa import lua52
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import base64
 
 class OutOfGasError(RuntimeError):
     """Raised when a script exceeds its instruction budget."""
@@ -96,6 +97,7 @@ def http_request(method: str, url: str, opts):
         json_data = opts.get("json")
         timeout = opts.get("timeout", 10)
         evolve = opts.get("evolve", False)
+        as_blob = opts.get("as_blob", False)
 
         with httpx.Client(follow_redirects=True, timeout=timeout) as client:
             resp = client.request(
@@ -106,15 +108,45 @@ def http_request(method: str, url: str, opts):
                 data=data,
                 json=json_data,
             )
+
+        content_type = resp.headers.get("content-type", "")
+        is_json = "application/json" in content_type
+        is_text = "text" in content_type or "html" in content_type or "xml" in content_type
+
+        # Determine appropriate body format
+        if evolve and is_text:
+            text_body = evolve_html(resp.text, str(resp.url))
+        elif is_text:
+            text_body = resp.text
+        elif as_blob:
+            text_body = base64.b64encode(resp.content).decode("utf-8")
+        else:
+            text_body = resp.text  # Fallback
+
         return {
-            "status_code": resp.status_code,
+            "ok": resp.status_code >= 200 and resp.status_code < 300,
+            "status": resp.status_code,
+            "statusText": resp.reason_phrase,
+            "url": str(resp.url),
             "headers": dict(resp.headers),
-            "text": resp.text if not evolve else evolve_html(resp.text, url),
-            "json": resp.json() if "application/json" in resp.headers.get("content-type", "") else None,
+            "text": text_body if is_text else None,
+            "json": resp.json() if is_json else None,
+            "blob": base64.b64encode(resp.content).decode("utf-8") if as_blob else None,
             "error": None,
         }
+
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "ok": False,
+            "status": 0,
+            "statusText": "NetworkError",
+            "url": url,
+            "headers": {},
+            "text": None,
+            "json": None,
+            "blob": None,
+            "error": str(e),
+        }
 
 def evolve_html(html: str, base_url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
