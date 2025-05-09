@@ -56,7 +56,9 @@ class LuaScriptRunner:
     def _sync_run(
         self,
         script: str,
-        tool_args: List[Any]
+        init_args: List[Any],
+        case: str,
+        case_args: List[Any]
     ) -> Any:
         lua = self._make_runtime()
         env = self._make_sandbox_env(lua)
@@ -68,7 +70,7 @@ class LuaScriptRunner:
         if not callable(loaded_chunk):
             raise TypeError("Lua script did not return a function.")
 
-        return loaded_chunk(*tool_args)
+        return loaded_chunk(*case_args)
 
     async def run(
         self,
