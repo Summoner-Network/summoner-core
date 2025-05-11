@@ -1,7 +1,7 @@
 import os
 import sys
 from summoner.client import SummonerClient
-from summoner.client import LuaScriptRunner, evolve_html
+from summoner.client import LuaScriptRunner
 from aioconsole import ainput
 import asyncio
 from summoner import generate_secret_key
