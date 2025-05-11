@@ -38,6 +38,14 @@ STATE = {
 
 SCAN_CYCLES = {}
 
+STATE_TRIGGERS = {
+    "domain": {  # domain name as key
+        "state_key": [  # the specific state key to watch
+            {"condition": lambda old, new: new > old, "tool": "tool_name", "args": []},
+        ]
+    }
+}
+
 async def execute_scan_cycle(domain, entry):
     while True:
         await asyncio.sleep(entry["interval"])
@@ -59,6 +67,20 @@ def register_scan_cycle(params):
         SCAN_CYCLES[domain][tool_name] = task
     else:
         SCAN_CYCLES[domain] = {tool_name: task}
+
+def register_state_trigger(domain: str, key: str, condition, callback, args=None):
+    triggers = STATE_TRIGGERS.setdefault(domain, {}).setdefault(key, [])
+    triggers.append({
+        "condition": condition,
+        "callback": callback,  # callable or str (named tool)
+        "args": args or []
+    })
+
+def unregister_state_trigger(domain: str, key: str, callback):
+    triggers = STATE_TRIGGERS.get(domain, {}).get(key, [])
+    STATE_TRIGGERS[domain][key] = [
+        t for t in triggers if t["callback"] != callback
+    ]
 
 class LuaScriptRunner:
     def __init__(
@@ -120,15 +142,62 @@ class LuaScriptRunner:
             domain = CURRENT_DOMAIN.get()
             if domain is None:
                 raise RuntimeError("No domain context for set_kv")
-            STATE.setdefault(domain, {})[key] = value
 
+            old_value = STATE.setdefault(domain, {}).get(key)
+            STATE[domain][key] = value
+
+            triggers = STATE_TRIGGERS.get(domain, {}).get(key, [])
+            for trigger in triggers:
+                try:
+                    if trigger["condition"](old_value, value):
+                        callback = trigger["callback"]
+                        args = trigger["args"]
+
+                        if callable(callback):
+                            # Lua function
+                            asyncio.create_task(_call_lua_callable(callback, args))
+                        elif isinstance(callback, str):
+                            # Named tool
+                            asyncio.create_task(_call_named_tool(domain, callback, args))
+                        else:
+                            raise TypeError("Invalid callback type")
+                except Exception as e:
+                    print(f"[state_trigger] Trigger error: {e}")
+
+        async def _call_lua_callable(lua_fn, args):
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lua_fn, *args)
+
+        async def _call_named_tool(domain, tool_name, args):
+            script = TOOLS.get(domain, {}).get(tool_name)
+            if not script:
+                print(f"[state_trigger] Named tool '{tool_name}' not found for domain '{domain}'")
+                return
+            runner = LuaScriptRunner()
+            try:
+                await runner.run(script, case_args=args)
+            except Exception as e:
+                print(f"[state_trigger] Named tool '{tool_name}' failed: {e}")
+        
+        def register_trigger(key, condition_fn, tool, args):
+            domain = CURRENT_DOMAIN.get()
+            condition = lambda old, new: condition_fn(old, new)
+            register_state_trigger(domain, key, condition, tool, args)
+
+        def unregister_trigger(key, tool):
+            domain = CURRENT_DOMAIN.get()
+            unregister_state_trigger(domain, key, tool)
+
+        env["scan_cycle"] = register_scan_cycle
+        env["register_trigger"] = register_trigger
+        env["unregister_trigger"] = unregister_trigger
         env["http_request"] = http_request
         env["use_tool"] = use_tool
         env["set_tool"] = set_tool
         env["get_kv"] = get_kv
         env["set_kv"] = set_kv
         env["print"] = lambda *args: print("[sandbox]", *args)
-        env["scan_cycle"] = register_scan_cycle
+        
         return env
 
     def _sync_run(
