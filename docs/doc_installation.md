@@ -54,7 +54,11 @@ cargo --version     # ✅ Should print the Cargo package manager version
 
 ## 3. Run the Setup Script
 
-Once Python and Rust are installed, initialize the project environment by running:
+Once Python and Rust are installed, `git clone` the default branch, for example by using 
+```bash
+git clone https://github.com/Summoner-Network/agent-sdk.git
+```
+and initialize the project environment by running:
 
 ```bash
 source setup.sh
