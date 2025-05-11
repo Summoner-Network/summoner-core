@@ -34,6 +34,32 @@ STATE = {
     "domain": {"key": 3}
 }
 
+# TODO: Make it possible for the lua code to get the identity of the running agent
+
+SCAN_CYCLES = {}
+
+async def execute_scan_cycle(domain, entry):
+    while True:
+        await asyncio.sleep(entry["interval"])
+        try:
+            script = TOOLS[domain][entry["tool"]]
+            await LuaScriptRunner().run(script, entry.get("args", []))
+        except Exception as e:
+            print(f"[scan_cycle] Error executing '{entry['tool']}' for domain '{domain}': {e}")
+
+def register_scan_cycle(params):
+    domain = CURRENT_DOMAIN.get()
+    interval = params.get("interval", 1000) / 1000.0  # convert to seconds
+    tool_name = params.get("name", "anonymous")
+    args = params.get("args", [])
+    entry = {"tool": tool_name, "interval": interval, "args": args}
+
+    task = asyncio.create_task(execute_scan_cycle(domain, entry))
+    if domain in SCAN_CYCLES:
+        SCAN_CYCLES[domain][tool_name] = task
+    else:
+        SCAN_CYCLES[domain] = {tool_name: task}
+
 class LuaScriptRunner:
     def __init__(
         self,
@@ -102,14 +128,13 @@ class LuaScriptRunner:
         env["get_kv"] = get_kv
         env["set_kv"] = set_kv
         env["print"] = lambda *args: print("[sandbox]", *args)
+        env["scan_cycle"] = register_scan_cycle
         return env
 
     def _sync_run(
         self,
         script: str,
-        init_args: List[Any],
-        case: str,
-        case_args: List[Any]
+        args: List[Any]
     ) -> Any:
         lua = self._make_runtime()
         env = self._make_sandbox_env(lua)
@@ -124,7 +149,7 @@ class LuaScriptRunner:
                     run_fn.name = loaded_chunk["name"]
                 except Exception:
                     pass
-                return run_fn(*case_args)
+                return run_fn(*args)
         except Exception as e:
             print("⚠️ Failed to handle returned tool table:", e)
 
@@ -133,12 +158,10 @@ class LuaScriptRunner:
     async def run(
         self,
         script: str,
-        init_args: List[Any] = [],
-        case: Optional[str] = None,
         case_args: Optional[List[Any]] = None
     ) -> Any:
         loop = asyncio.get_running_loop()
-        fut = loop.run_in_executor(None, self._sync_run, script, init_args, case, case_args or [])
+        fut = loop.run_in_executor(None, self._sync_run, script, case_args or [])
         return await asyncio.wait_for(fut, timeout=self.timeout_s)
 
         
@@ -177,19 +200,31 @@ def parse_http_request(raw, base_url=None):
 
 def http_request(opts):
     global TOOLS
+
+    if isinstance(opts, dict):
+        parsed_opts = opts
+    else:
+        parsed_opts = _lua_table_to_dict(opts or {})
+
+    method = parsed_opts.get("method", "GET").upper()
+    url = parsed_opts.get("url")
+
+    headers = parsed_opts.get("headers")
+    if not isinstance(headers, dict):
+        headers = _lua_table_to_dict(headers)
+
+    params = parsed_opts.get("params")
+    if not isinstance(params, dict):
+        params = _lua_table_to_dict(params)
+
+    data = parsed_opts.get("data")
+    json_data = parsed_opts.get("json")
+    timeout = parsed_opts.get("timeout", 10)
+    as_blob = parsed_opts.get("as_blob", False)
+
     content_type = ""
 
     try:
-        opts = _lua_table_to_dict(opts or {})
-        method = opts.get("method", "GET").upper()
-        url = opts.get("url")
-        headers = _lua_table_to_dict(opts.get("headers"))
-        params = _lua_table_to_dict(opts.get("params"))
-        data = opts.get("data")
-        json_data = opts.get("json")
-        timeout = opts.get("timeout", 10)
-        as_blob = opts.get("as_blob", False)
-
         with httpx.Client(follow_redirects=True, timeout=timeout) as client:
             resp = client.request(
                 method=method,
@@ -201,74 +236,73 @@ def http_request(opts):
             )
 
         content_type = resp.headers.get("content-type", "")
+
+        response = {
+            "ok": 200 <= resp.status_code < 300,
+            "status": resp.status_code,
+            "statusText": resp.reason_phrase,
+            "mimetype": content_type,
+            "url": str(resp.url),
+            "headers": dict(resp.headers),
+            "text": None,
+            "json": None,
+            "blob": None,
+            "error": None,
+        }
+
         is_json = "application/json" in content_type
         is_text = any(t in content_type for t in ["text", "html", "xml"])
         is_code = content_type.startswith("text/lua")
         is_http = content_type.startswith("application/http")
 
-        # Register Lua tool if needed
         if is_code:
             try:
-                name = LuaScriptRunner().run(resp.text).name
+                lua_runner = LuaScriptRunner()
+                script_meta = asyncio.run(lua_runner.run(resp.text))
                 domain = urlparse(url).hostname
-                if domain in TOOLS:
-                    TOOLS[domain][name] = resp.text
-                else:
-                    TOOLS[domain] = {name: resp.text}
-            except Exception:
-                pass
+                tool_name = getattr(script_meta, 'name', None)
 
-        # Recursively resolve HTTP instructions
-        if is_http:
-            raw_body = resp.text
-            try:
-                inner_request = parse_http_request(raw_body, base_url=url)
-                inner_response = http_request(inner_request)
-                return {
-                    "ok": True,
-                    "mimetype": content_type,
-                    "status": resp.status_code,
-                    "statusText": resp.reason_phrase,
-                    "url": str(resp.url),
-                    "headers": dict(resp.headers),
-                    "http_recursive": inner_response,
-                    "error": None
-                }
+                if tool_name:
+                    if domain in TOOLS:
+                        TOOLS[domain][tool_name] = resp.text
+                    else:
+                        TOOLS[domain] = {tool_name: resp.text}
             except Exception as e:
-                return {
+                response["error"] = f"Failed to register Lua tool: {str(e)}"
+
+        if is_http:
+            try:
+                inner_request = parse_http_request(resp.text, base_url=url)
+                return http_request(inner_request)
+            except Exception as e:
+                response.update({
                     "ok": False,
-                    "status": resp.status_code,
                     "statusText": "Invalid application/http",
-                    "mimetype": content_type,
-                    "url": str(resp.url),
-                    "headers": dict(resp.headers),
                     "error": f"Failed to parse or recurse: {str(e)}"
-                }
+                })
+                return response
 
-        # Normal return
-        text_body = resp.text if is_text else None
-        blob_data = base64.b64encode(resp.content).decode("utf-8") if as_blob else None
+        if is_text:
+            response["text"] = resp.text
 
-        return {
-            "ok": 200 <= resp.status_code < 300,
-            "mimetype": content_type,
-            "status": resp.status_code,
-            "statusText": resp.reason_phrase,
-            "url": str(resp.url),
-            "headers": dict(resp.headers),
-            "text": text_body,
-            "json": resp.json() if is_json else None,
-            "blob": blob_data,
-            "error": None,
-        }
+        if is_json:
+            try:
+                response["json"] = resp.json()
+            except ValueError:
+                response["json"] = None
 
-    except Exception as e:
+        if as_blob:
+            response["blob"] = base64.b64encode(resp.content).decode("utf-8")
+
+        return response
+
+    except httpx.RequestError as e:
         return {
             "ok": False,
             "status": 0,
             "statusText": "NetworkError",
             "mimetype": content_type,
-            "url": opts.get("url", ""),
+            "url": url or "",
             "headers": {},
             "text": None,
             "json": None,
