@@ -5,7 +5,7 @@ import random
 from pathlib import Path
 from datetime import datetime
 import aiosqlite
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 
 state = {
     "current_offer": 1000,

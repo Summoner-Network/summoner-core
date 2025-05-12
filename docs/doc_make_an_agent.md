@@ -1,4 +1,4 @@
-# Creating an Agent with the SDK
+# Creating an Agent with the core SDK
 
 <p align="center">
 <img width="210px" src="../img/druid_agent.png" />
@@ -87,7 +87,7 @@ Below is a minimal agent template. You can adjust the `name`, `host`, and `port`
 ```python
 import os
 import sys
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 from aioconsole import ainput
 
 if __name__ == "__main__":
@@ -105,7 +105,7 @@ You define how an agent behaves by using the `@send` and `@receive` decorators p
 ```python
 import os
 import sys
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 from aioconsole import ainput
 
 if __name__ == "__main__":
@@ -161,7 +161,7 @@ This agent sends a rotating list of questions. It also listens for any response 
 import os
 import sys
 import asyncio
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 
 QUESTIONS = [
     "What is your name?",
@@ -206,7 +206,7 @@ This agent waits for specific questions and replies with matching answers. It ad
 import os
 import sys
 import asyncio
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 
 # Predefined answers for each known question
 ANSWERS = {
@@ -306,7 +306,7 @@ This pattern is the foundation for more advanced features like:
 
 ## Going Further: Routes as Transition Paths
 
-In the examples so far, we only used a simple empty string `""` for the `route` argument. However, the SDK is actually built to support much richer structures.
+In the examples so far, we only used a simple empty string `""` for the `route` argument. However, the core SDK is actually built to support much richer structures.
 
 Routes are designed to **encode state transitions** directly.  
 Instead of representing just a destination state, a route can describe a **path between states**.

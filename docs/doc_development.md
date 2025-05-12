@@ -1,6 +1,6 @@
 # 🔐 GitHub Branch Rulesets
 
-To maintain a secure, reliable, and high-quality codebase, the `Summoner-Network/agent-sdk` repository enforces branch protection rules on both the `main` and `dev` branches.  
+To maintain a secure, reliable, and high-quality codebase, the `Summoner-Network/summoner-core` repository enforces branch protection rules on both the `main` and `dev` branches.  
 Please review the following guidelines carefully before contributing.
 
 ## 🚩 `ruleset-main` (Default Branch)

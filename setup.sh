@@ -33,7 +33,7 @@ DATABASE_URL=postgres://user:pass@localhost:5432/mydb
 SECRET_KEY=supersecret
 EOF
 
-    # Reinstall SDK and Rust crates
+    # Reinstall core SDK and Rust crates
     # bash "$SCRIPT_DIR/reinstall_rust_server.sh" rust_server_sdk
     bash "$SCRIPT_DIR/reinstall_python_sdk.sh" rust_server_sdk
 

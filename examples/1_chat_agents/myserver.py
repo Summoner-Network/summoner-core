@@ -1,7 +1,7 @@
 import os
 import sys
 import argparse
-from summoner.server import SummonerServer
+from summoner_core.server import SummonerServer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SummonerServer with a specified config.")

@@ -1,7 +1,7 @@
 import os
 import sys
 import asyncio
-from summoner.client import SummonerClient
+from summoner_core.client import SummonerClient
 
 ANSWERS = {
     "What is your name?": "I am AnswerBot.",
