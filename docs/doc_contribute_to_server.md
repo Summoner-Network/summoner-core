@@ -149,10 +149,10 @@ To begin development on a new Rust server implementation:
    ```
 
 8. **Refresh the Python SDK installation**  
-   Because you modified `server.py`, the `summoner` package must be reinstalled in editable mode to reflect those changes. Run:
+   Because you modified `server.py`, the `summoner` package must be reinstalled to reflect those changes. Run:
    ```bash
    pip uninstall -y summoner
-   pip install -e .
+   pip install .
    ```
 
 9. **Test your server**  
