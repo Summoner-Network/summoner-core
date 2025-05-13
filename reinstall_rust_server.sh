@@ -7,7 +7,7 @@ PREFIX_FILTER="$1"  # e.g., "relay_v" or empty for all
 
 # --- Resolve paths ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUST_DIR="$SCRIPT_DIR/summoner_core/rust"
+RUST_DIR="$SCRIPT_DIR/summoner/rust"
 
 # --- Validate directory ---
 if [ ! -d "$RUST_DIR" ]; then

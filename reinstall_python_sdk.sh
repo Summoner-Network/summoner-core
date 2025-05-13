@@ -15,16 +15,16 @@ bash "$SCRIPT_DIR/reinstall_rust_server.sh" "$PREFIX_FILTER"
 # --- Reinstall Python core SDK (editable) ---
 cd "$SCRIPT_DIR"
 
-# Check if summoner_core is already installed and uninstall if so
-if pip show summoner_core > /dev/null 2>&1; then
-  echo "🗑️ Uninstalling existing 'summoner_core' package..."
-  pip uninstall -y summoner_core
+# Check if summoner is already installed and uninstall if so
+if pip show summoner > /dev/null 2>&1; then
+  echo "🗑️ Uninstalling existing 'summoner' package..."
+  pip uninstall -y summoner
 else
-  echo "ℹ️ 'summoner_core' not currently installed — skipping uninstall."
+  echo "ℹ️ 'summoner' not currently installed — skipping uninstall."
 fi
 
 # Reinstall as editable
-echo "📦 Reinstalling 'summoner_core' ..."
+echo "📦 Reinstalling 'summoner' ..."
 pip install .
 
 echo "✅ Python core SDK reinstalled with prefix filter: '$PREFIX_FILTER'"

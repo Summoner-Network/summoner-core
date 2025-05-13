@@ -1,7 +1,7 @@
 import os
 import sys
 import asyncio
-from summoner_core.client import SummonerClient
+from summoner.client import SummonerClient
 
 QUESTIONS = [
     "What is your name?",

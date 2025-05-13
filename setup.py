@@ -1,12 +1,12 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="summoner_core",
+    name="summoner",
     version="0.1.0",
     description="Summoner's core SDK",
     author="Remy Tuyeras, Elliott Dehnbostel",
     author_email="rtuyeras@summoner.to",
-    packages=find_packages(include=["summoner_core", "summoner_core.*"]),
+    packages=find_packages(include=["summoner", "summoner.*"]),
     install_requires=[
         "aioconsole==0.8.1",
         "python-dotenv==1.1.0"

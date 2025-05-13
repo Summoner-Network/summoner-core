@@ -70,15 +70,15 @@ This script performs the following actions:
 - Installs required **Python packages** listed in `requirements.txt`
 - Generates a default **`.env`** file with configuration placeholders
 - Installs all available **Rust server implementations**, using `Cargo.lock` to ensure consistent builds
-- ✨ **[NEW]** Installs the `summoner_core` folder as a **Python package** in editable mode, enabling clean imports like `from summoner_core.server import *` without modifying `PYTHONPATH`
+- ✨ **[NEW]** Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
 
 
 ### What This Means for Imports
 
-With `summoner_core` installed as an editable pip package, you can write imports like:
+With `summoner` installed as an editable pip package, you can write imports like:
 
 ```python
-from summoner_core.server import SummonerServer
+from summoner.server import SummonerServer
 ```
 
 ... without modifying your `PYTHONPATH`.
@@ -103,10 +103,10 @@ DATABASE_URL=postgres://user:pass@localhost:5432/mydb
 SECRET_KEY=supersecret
 ```
 
-After editing `.env`, make sure these values are correctly read by the Python settings module (`summoner_core/settings.py`). It uses `os.getenv()` to load defaults:
+After editing `.env`, make sure these values are correctly read by the Python settings module (`summoner/settings.py`). It uses `os.getenv()` to load defaults:
 
 ```python
-# summoner_core/settings.py
+# summoner/settings.py
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")
 ENABLE_CONSOLE_LOG = os.getenv("ENABLE_CONSOLE_LOG", "true").lower() == "true"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///local.db")

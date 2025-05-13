@@ -10,10 +10,10 @@ If you are looking to understand how the Rust components integrate into the broa
 
 ## Overview
 
-The Rust server logic is located under the `summoner_core/` directory, which also houses the Python core SDK for client agents. While client interactions are handled purely in Python, the server logic supports two interchangeable implementations:
+The Rust server logic is located under the `summoner/` directory, which also houses the Python core SDK for client agents. While client interactions are handled purely in Python, the server logic supports two interchangeable implementations:
 
-- A **Python-based server** (`summoner_core/server/server.py`) designed for experimentation and testing.
-- A **Rust-based server** (`summoner_core/rust/`) designed for high performance and production readiness.
+- A **Python-based server** (`summoner/server/server.py`) designed for experimentation and testing.
+- A **Rust-based server** (`summoner/rust/`) designed for high performance and production readiness.
 
 These Rust modules are exposed to Python via [PyO3](https://pyo3.rs/), allowing seamless integration with the core SDK. You can switch between server implementations by specifying an option when launching the server.
 
@@ -22,7 +22,7 @@ These Rust modules are exposed to Python via [PyO3](https://pyo3.rs/), allowing 
 ### Project Structure
 
 ```bash
-summoner_core
+summoner
 ├── client             # Agent core SDK (Python)
 ├── protocol
 ├── rust               # Rust server implementations
@@ -85,7 +85,7 @@ More details are available in the [Installation Guide](doc_installation.md).
 To begin development on a new Rust server implementation:
 
 1. **Identify a base module**  
-   Navigate to `summoner_core/rust/` and locate the most recent module (e.g. `rust_server_sdk_2`).
+   Navigate to `summoner/rust/` and locate the most recent module (e.g. `rust_server_sdk_2`).
 
 2. **Duplicate and rename**  
    Copy the folder and rename it (e.g. `awesome_rust_server`).
@@ -149,9 +149,9 @@ To begin development on a new Rust server implementation:
    ```
 
 8. **Refresh the Python core SDK installation**  
-   Because you modified `server.py`, the `summoner_core` package must be reinstalled to reflect those changes. Run:
+   Because you modified `server.py`, the `summoner` package must be reinstalled to reflect those changes. Run:
    ```bash
-   pip uninstall -y summoner_core
+   pip uninstall -y summoner
    pip install .
    ```
 

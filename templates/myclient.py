@@ -1,6 +1,6 @@
 import os
 import sys
-from summoner_core.client import SummonerClient
+from summoner.client import SummonerClient
 from aioconsole import ainput
 
 if __name__ == "__main__":
