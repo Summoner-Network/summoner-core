@@ -19,7 +19,7 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
   . "$VENV_DIR/bin/activate"
 else
   echo "❌ Virtualenv not found at: $VENV_DIR"
-  # exit 1
+  exit 1
 fi
 
 # Diagnostic: show interpreter in use
@@ -35,7 +35,7 @@ PREFIX_FILTER="${1:-}"  # Optional CLI argument
 echo "🔁 Reinstalling Rust crates via: $RUST_SCRIPT"
 if [ ! -f "$RUST_SCRIPT" ]; then
   echo "❌ Missing script: $RUST_SCRIPT"
-  # exit 1
+  exit 1
 fi
 
 bash "$RUST_SCRIPT" "$PREFIX_FILTER"
