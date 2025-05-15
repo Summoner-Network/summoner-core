@@ -2,12 +2,14 @@
 
 set -e  # Exit on error
 
-# 🔒 Activate virtualenv explicitly (Electron may not propagate PATH)
-if [ -f "../venv/bin/activate" ]; then
-  . "../venv/bin/activate"
-  echo "✅ Virtualenv activated inside reinstall_rust_server.sh"
+# Activate venv explicitly from parent of summoner-src
+VENV_PATH=\"$(cd \"$(dirname \"$0\")/..\" && pwd)/venv\"
+if [ -f \"$VENV_PATH/bin/activate\" ]; then
+  echo \"✅ Activating venv from $VENV_PATH\"
+  . \"$VENV_PATH/bin/activate\"
 else
-  echo "❌ Could not find venv/bin/activate — maturin may fail"
+  echo \"❌ Could not find venv at $VENV_PATH\"
+  exit 1
 fi
 
 # --- Parse optional argument ---

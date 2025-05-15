@@ -2,6 +2,17 @@
 
 set -e  # Exit on error
 
+
+# Activate venv from known relative path (sibling of summoner-src)
+VENV_PATH=\"$(cd \"$(dirname \"$0\")/..\" && pwd)/venv\"
+if [ -f \"$VENV_PATH/bin/activate\" ]; then
+  echo \"✅ Activating venv from $VENV_PATH\"
+  . \"$VENV_PATH/bin/activate\"
+else
+  echo \"❌ Could not find venv at $VENV_PATH\"
+  exit 1
+fi
+
 # --- Parse optional prefix argument ---
 PREFIX_FILTER="$1"  # e.g., "rust_server_sdk_"
 
