@@ -1,41 +1,60 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e  # Exit on error
+set -euo pipefail
 
+# ─────────────────────────────────────────────────────────────
+# Resolve absolute paths
+# ─────────────────────────────────────────────────────────────
+THIS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$THIS_SCRIPT/.." && pwd)"
+VENV_DIR="$ROOT_DIR/venv"
+RUST_SCRIPT="$THIS_SCRIPT/reinstall_rust_server.sh"
 
-# Activate venv from known relative path (sibling of summoner-src)
-VENV_PATH=\"$(cd \"$(dirname \"$0\")/..\" && pwd)/venv\"
-if [ -f \"$VENV_PATH/bin/activate\" ]; then
-  echo \"✅ Activating venv from $VENV_PATH\"
-  . \"$VENV_PATH/bin/activate\"
+# ─────────────────────────────────────────────────────────────
+# Activate virtualenv
+# ─────────────────────────────────────────────────────────────
+if [ -f "$VENV_DIR/bin/activate" ]; then
+  echo "✅ Activating venv from: $VENV_DIR"
+  # shellcheck disable=SC1090
+  . "$VENV_DIR/bin/activate"
 else
-  echo \"❌ Could not find venv at $VENV_PATH\"
-  exit 1
+  echo "❌ Virtualenv not found at: $VENV_DIR"
+  # exit 1
 fi
 
-# --- Parse optional prefix argument ---
-PREFIX_FILTER="$1"  # e.g., "rust_server_sdk_"
+# Diagnostic: show interpreter in use
+echo "🐍 Using Python: $(which python)"
+echo "📦 Using Pip:    $(which pip)"
+echo "🔧 Pip version:  $(pip --version)"
 
-# --- Resolve paths ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ─────────────────────────────────────────────────────────────
+# Reinstall Rust crates (optional prefix)
+# ─────────────────────────────────────────────────────────────
+PREFIX_FILTER="${1:-}"  # Optional CLI argument
 
-# --- Reinstall matching Rust crates ---
-echo "🔁 Calling reinstall_rust_server.sh with prefix: $PREFIX_FILTER"
-bash "$SCRIPT_DIR/reinstall_rust_server.sh" "$PREFIX_FILTER"
+echo "🔁 Reinstalling Rust crates via: $RUST_SCRIPT"
+if [ ! -f "$RUST_SCRIPT" ]; then
+  echo "❌ Missing script: $RUST_SCRIPT"
+  # exit 1
+fi
 
-# --- Reinstall Python core SDK (editable) ---
-cd "$SCRIPT_DIR"
+bash "$RUST_SCRIPT" "$PREFIX_FILTER"
 
-# Check if summoner is already installed and uninstall if so
+# ─────────────────────────────────────────────────────────────
+# Reinstall Python package in editable mode
+# ─────────────────────────────────────────────────────────────
+echo "🔁 Reinstalling Python package: summoner"
+
+cd "$THIS_SCRIPT"
+
 if pip show summoner > /dev/null 2>&1; then
-  echo "🗑️ Uninstalling existing 'summoner' package..."
+  echo "🗑️  Uninstalling existing 'summoner' package..."
   pip uninstall -y summoner
 else
-  echo "ℹ️ 'summoner' not currently installed — skipping uninstall."
+  echo "ℹ️  'summoner' not currently installed — skipping uninstall."
 fi
 
-# Reinstall as editable
-echo "📦 Reinstalling 'summoner' ..."
+echo "📦 Installing 'summoner' in editable mode..."
 pip install .
 
-echo "✅ Python core SDK reinstalled with prefix filter: '$PREFIX_FILTER'"
+echo "✅ Python SDK reinstalled successfully with prefix: '$PREFIX_FILTER'"

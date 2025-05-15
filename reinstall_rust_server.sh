@@ -1,35 +1,56 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e  # Exit on error
+set -euo pipefail
 
-# Activate venv explicitly from parent of summoner-src
-VENV_PATH=\"$(cd \"$(dirname \"$0\")/..\" && pwd)/venv\"
-if [ -f \"$VENV_PATH/bin/activate\" ]; then
-  echo \"✅ Activating venv from $VENV_PATH\"
-  . \"$VENV_PATH/bin/activate\"
+# ─────────────────────────────────────────────────────────────
+# Resolve script and project paths
+# ─────────────────────────────────────────────────────────────
+THIS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$THIS_SCRIPT/.." && pwd)"
+VENV_DIR="$ROOT_DIR/venv"
+RUST_DIR="$THIS_SCRIPT/summoner/rust"
+
+# ─────────────────────────────────────────────────────────────
+# Activate virtualenv
+# ─────────────────────────────────────────────────────────────
+if [ -f "$VENV_DIR/bin/activate" ]; then
+  echo "✅ Activating venv from: $VENV_DIR"
+  # shellcheck disable=SC1090
+  . "$VENV_DIR/bin/activate"
 else
-  echo \"❌ Could not find venv at $VENV_PATH\"
-  exit 1
+  echo "❌ Virtualenv not found at: $VENV_DIR"
+  # exit 1
 fi
 
-# --- Parse optional argument ---
-PREFIX_FILTER="$1"  # e.g., "relay_v" or empty for all
+# Diagnostic: confirm Python & maturin paths
+echo "🐍 Python:   $(which python)"
+echo "🔧 Maturin:  $(which maturin || echo 'not found')"
 
-# --- Resolve paths ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUST_DIR="$SCRIPT_DIR/summoner/rust"
+# ─────────────────────────────────────────────────────────────
+# Parse optional prefix filter
+# ─────────────────────────────────────────────────────────────
+PREFIX_FILTER="${1:-}"  # Optional CLI arg
 
-# --- Validate directory ---
+# ─────────────────────────────────────────────────────────────
+# Validate Rust SDK directory
+# ─────────────────────────────────────────────────────────────
 if [ ! -d "$RUST_DIR" ]; then
-  echo "❌ Directory not found: $RUST_DIR"
-  exit 1
+  echo "❌ Expected Rust SDK path not found: $RUST_DIR"
+  # exit 1
 fi
 
-# --- Process matching subdirectories with Cargo.toml ---
+# ─────────────────────────────────────────────────────────────
+# Discover and reinstall matching crates
+# ─────────────────────────────────────────────────────────────
 FOUND=0
+echo "🔍 Searching for Rust crates in: $RUST_DIR"
+
 for DIR in "$RUST_DIR"/*/; do
   BASENAME="$(basename "$DIR")"
+  echo "🔎 Found directory: $BASENAME"
+
   if [[ -n "$PREFIX_FILTER" && "$BASENAME" != $PREFIX_FILTER* ]]; then
+    echo "🚫 Skipping: $BASENAME (does not match prefix: $PREFIX_FILTER)"
     continue
   fi
 
@@ -41,13 +62,15 @@ for DIR in "$RUST_DIR"/*/; do
     echo "🧼 Running cargo clean..."
     cargo clean
 
-    echo "🔨 Rebuilding with maturin develop --release..."
+    echo "🔨 Rebuilding with: maturin develop --release"
     maturin develop --release
 
-    echo "✅ Reinstalled crate in $DIR"
+    echo "✅ Reinstalled crate: $BASENAME"
+  else
+    echo "⚠️ No Cargo.toml found in: $DIR — skipping"
   fi
 done
 
-if [ $FOUND -eq 0 ]; then
-  echo "⚠️ No matching folders with Cargo.toml found in $RUST_DIR"
+if [ "$FOUND" -eq 0 ]; then
+  echo "⚠️ No matching crates found with prefix: '$PREFIX_FILTER'"
 fi
