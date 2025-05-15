@@ -2,13 +2,15 @@
 
 set -e  # Exit on error
 
-# Ensure we're using the virtualenv Python and tools
-if [ -f "../../venv/bin/activate" ]; then
-  . "../../venv/bin/activate"
-  echo "✅ Virtualenv activated inside reinstall_rust_server.sh"
+# 🔒 Activate virtualenv explicitly (Electron may not propagate PATH)
+if [ -f ../venv/bin/activate ]; then
+  echo \"✅ Activating virtualenv from ../venv/bin/activate\"
+  . ../venv/bin/activate
 else
-  echo "❌ Could not find venv/bin/activate — maturin may fail"
+  echo \"❌ Could not find virtualenv at ../venv/bin/activate\"
+  exit 1
 fi
+
 
 # --- Parse optional argument ---
 PREFIX_FILTER="$1"  # e.g., "relay_v" or empty for all
