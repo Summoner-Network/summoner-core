@@ -5,6 +5,7 @@ experiments/
 *.log.[1-9]
 *.mov
 examples/demo_seller_agent/negotiation_history.db
+*.sh.old
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
