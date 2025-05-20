@@ -1,5 +1,3 @@
-import os
-import sys
 import asyncio
 import random
 from summoner.client import SummonerClient

@@ -126,7 +126,10 @@ class SummonerClient:
                 except:
                     payload = remove_last_newline(data.decode())
 
-                await asyncio.gather(*(fn(payload) for fn in receivers))
+                # await asyncio.gather(*(fn(payload) for fn in receivers))
+                for fn in receivers:
+                    await fn(payload)
+                    
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
             raise

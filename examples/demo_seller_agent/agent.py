@@ -1,5 +1,3 @@
-import os
-import sys
 import asyncio
 import random
 from pathlib import Path

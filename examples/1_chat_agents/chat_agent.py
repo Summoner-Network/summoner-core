@@ -1,5 +1,3 @@
-import os
-import sys
 from summoner.client import SummonerClient
 from aioconsole import ainput
 

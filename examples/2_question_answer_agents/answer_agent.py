@@ -1,5 +1,3 @@
-import os
-import sys
 import asyncio
 from summoner.client import SummonerClient
 
