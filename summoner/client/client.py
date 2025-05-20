@@ -115,7 +115,7 @@ class SummonerClient:
                     if payload is None:
                         continue  
                     
-                    message = json.dumps(payload) if not isinstance(payload, str) else payload
+                    message = json.dumps(payload) if not isinstance(payload, str) or "\n" in payload else payload
 
                     writer.write(ensure_trailing_newline(message).encode())
 
