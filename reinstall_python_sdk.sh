@@ -7,8 +7,34 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────
 THIS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$THIS_SCRIPT/.." && pwd)"
-VENV_DIR="$ROOT_DIR/venv"
 RUST_SCRIPT="$THIS_SCRIPT/reinstall_rust_server.sh"
+
+# ─────────────────────────────────────────────────────────────
+# Parse args: <optional-prefix> [--dev-core]
+# ─────────────────────────────────────────────────────────────
+DEV_CORE=false
+PREFIX_FILTER=""
+
+echo "🔍 Raw arguments: $*"
+
+for arg in "$@"; do
+  if [[ "$arg" == "--dev-core" ]]; then
+    DEV_CORE=true
+  elif [[ -z "$PREFIX_FILTER" && "$arg" != --* ]]; then
+    PREFIX_FILTER="$arg"
+  fi
+done
+
+echo "✅ Final values: DEV_CORE=$DEV_CORE, PREFIX_FILTER=$PREFIX_FILTER"
+
+# ─────────────────────────────────────────────────────────────
+# Select venv location
+# ─────────────────────────────────────────────────────────────
+if $DEV_CORE; then
+  VENV_DIR="$THIS_SCRIPT/venv"
+else
+  VENV_DIR="$ROOT_DIR/venv"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Activate virtualenv
@@ -19,7 +45,7 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
   . "$VENV_DIR/bin/activate"
 else
   echo "❌ Virtualenv not found at: $VENV_DIR"
-  exit 1
+  # exit 1
 fi
 
 # Diagnostic: show interpreter in use
@@ -30,15 +56,17 @@ echo "🔧 Pip version:  $(pip --version)"
 # ─────────────────────────────────────────────────────────────
 # Reinstall Rust crates (optional prefix)
 # ─────────────────────────────────────────────────────────────
-PREFIX_FILTER="${1:-}"  # Optional CLI argument
-
 echo "🔁 Reinstalling Rust crates via: $RUST_SCRIPT"
 if [ ! -f "$RUST_SCRIPT" ]; then
   echo "❌ Missing script: $RUST_SCRIPT"
-  exit 1
+  # exit 1
 fi
 
-bash "$RUST_SCRIPT" "$PREFIX_FILTER"
+if $DEV_CORE; then
+  bash "$RUST_SCRIPT" "$PREFIX_FILTER" --dev-core
+else
+  bash "$RUST_SCRIPT" "$PREFIX_FILTER"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Reinstall Python package in editable mode
@@ -58,3 +86,9 @@ echo "📦 Installing 'summoner' in editable mode..."
 pip install .
 
 echo "✅ Python SDK reinstalled successfully with prefix: '$PREFIX_FILTER'"
+
+if $DEV_CORE; then
+  echo "   (used --dev-core → venv at $THIS_SCRIPT/venv)"
+else
+  echo "   (used default → venv at $ROOT_DIR/venv)"
+fi

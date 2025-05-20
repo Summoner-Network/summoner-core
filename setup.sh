@@ -35,7 +35,8 @@ EOF
 
     # Reinstall core SDK and Rust crates
     # bash "$SCRIPT_DIR/reinstall_rust_server.sh" rust_server_sdk
-    bash "$SCRIPT_DIR/reinstall_python_sdk.sh" rust_server_sdk
+    # bash "$SCRIPT_DIR/reinstall_python_sdk.sh" rust_server_sdk
+    bash "$SCRIPT_DIR/reinstall_python_sdk.sh" rust_server_sdk --dev-core
 
     echo "✅ Setup complete. Environment initialized, dependencies installed, and Rust servers reinstalled."
 fi
