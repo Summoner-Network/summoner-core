@@ -95,27 +95,47 @@ class SummonerClient:
     async def message_sender_loop(self, writer: asyncio.StreamWriter, stop_event: asyncio.Event):
         try:
             while not stop_event.is_set():
+                
                 # Snapshot sending functions to avoid lock during iteration
                 async with self.routes_lock:
+                    # TODO: multi
                     senders = list(self.sending_functions.values())
+                
+                if senders == []:
+                    await asyncio.sleep(0.1)  # prevent tight loop
+                    continue
+            
                 payloads = await asyncio.gather(*(fn() for fn in senders))
                 for payload in payloads:
                     if isinstance(payload, str) and payload == "/quit":
                         stop_event.set()
                         break
                     
+                    # skip empty sends
+                    if payload is None:
+                        continue  
+                    
                     message = json.dumps(payload) if not isinstance(payload, str) else payload
+
                     writer.write(ensure_trailing_newline(message).encode())
+
                 await writer.drain()
+
         except asyncio.CancelledError as e:
             self.logger.info(f"Client about to disconnect...") # add new line when using Ctrl + C
 
     async def message_listener_loop(self, reader: asyncio.StreamReader, stop_event: asyncio.Event):
         try:
-            # Snapshot receiving functions to avoid lock during iteration
-            async with self.routes_lock:
-                receivers = list(self.receiving_functions.values())
             while True:
+                
+                # Snapshot receiving functions to avoid lock during iteration
+                async with self.routes_lock:
+                    receivers = list(self.receiving_functions.values())
+
+                if receivers == []:
+                    await asyncio.sleep(0.1)  # prevent tight loop
+                    continue
+
                 data = await reader.readline()
                 if not data:
                     raise ServerDisconnected("Server closed the connection.")
@@ -129,7 +149,7 @@ class SummonerClient:
                 # await asyncio.gather(*(fn(payload) for fn in receivers))
                 for fn in receivers:
                     await fn(payload)
-                    
+
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
             raise
