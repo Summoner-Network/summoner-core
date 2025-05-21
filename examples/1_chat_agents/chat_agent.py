@@ -2,7 +2,7 @@ from summoner.client import SummonerClient
 from aioconsole import ainput
 
 if __name__ == "__main__":
-    myagent = SummonerClient(name="ChatAgent", option = "python")
+    myagent = SummonerClient(name="ChatAgent")
 
     @myagent.receive(route="custom_receive")
     async def custom_receive(msg):

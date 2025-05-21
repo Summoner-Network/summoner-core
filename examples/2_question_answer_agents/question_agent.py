@@ -12,7 +12,7 @@ tracker_lock = asyncio.Lock()
 tracker = {"count": 0}
 
 if __name__ == "__main__":
-    agent = SummonerClient(name="QuestionAgent", option="python")
+    agent = SummonerClient(name="QuestionAgent")
 
     @agent.receive(route="")
     async def receive_response(msg):

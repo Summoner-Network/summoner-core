@@ -11,7 +11,7 @@ track_lock = asyncio.Lock()
 track_questions = {}
 
 if __name__ == "__main__":
-    agent = SummonerClient(name="AnswerBot", option="python")
+    agent = SummonerClient(name="AnswerBot")
 
     @agent.receive(route="")
     async def handle_question(msg):
