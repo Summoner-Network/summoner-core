@@ -286,6 +286,3 @@ class SummonerClient:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
             self.loop.close()
             self.logger.info("Client exited cleanly.")
-
-            import logging
-            logging.shutdown()
