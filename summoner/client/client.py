@@ -136,19 +136,30 @@ class SummonerClient:
                     await asyncio.sleep(0.1)  # prevent tight loop
                     continue
 
-                data = await reader.readline()
-                if not data:
-                    raise ServerDisconnected("Server closed the connection.")
-                
                 try:
-                    # payload = json.loads(data.decode())
-                    payload = fully_recover_json(data.decode())
-                except:
-                    payload = remove_last_newline(data.decode())
+                    data = await reader.readline()
+                    if not data:
+                        raise ServerDisconnected("Server closed the connection.")
+                    
+                    try:
+                        # payload = json.loads(data.decode())
+                        payload = fully_recover_json(data.decode())
+                    except:
+                        payload = remove_last_newline(data.decode())
 
-                # await asyncio.gather(*(fn(payload) for fn in receivers))
-                for fn in receivers:
-                    await fn(payload)
+                    # await asyncio.gather(*(fn(payload) for fn in receivers))
+
+                    # Receive message in order if there is an order
+                    for fn in receivers:
+                        await fn(payload)
+                
+                except ServerDisconnected as e:
+                    # Intentionally propagate this so reconnection logic can trigger
+                    self.logger.info(f"Graceful disconnect from server: {e}")
+                    raise
+                except (ConnectionResetError, BrokenPipeError) as e:
+                    self.logger.warning(f"Socket-level failure (client likely to blame): {e}")
+                    break
 
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
@@ -204,6 +215,8 @@ class SummonerClient:
                 except asyncio.CancelledError:
                     # Normal during shutdown; ignore
                     pass
+                except Exception as e:
+                    self.logger.exception(f"Unexpected error during session task: {e}")
 
             # Cleanly close the connection
             writer.close()
