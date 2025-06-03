@@ -147,11 +147,18 @@ class SummonerClient:
                     except:
                         payload = remove_last_newline(data.decode())
 
-                    # await asyncio.gather(*(fn(payload) for fn in receivers))
-
-                    # Receive message in order if there is an order
+                    # Receive message in order (if order matters)
                     for fn in receivers:
-                        await fn(payload)
+                        try:
+                            await fn(payload)
+                        except BlockingIOError:
+                            self.logger.warning("Receiver function raised BlockingIOError; skipping.")
+                        except Exception as e:
+                            self.logger.exception(f"Receiver function raised an unexpected error: {e}")
+                            raise
+                    
+                    # Previous alternative -- less structured -- not recommended
+                    # await asyncio.gather(*(fn(payload) for fn in receivers))
                 
                 except ServerDisconnected as e:
                     # Intentionally propagate this so reconnection logic can trigger
