@@ -251,17 +251,17 @@ You need **three terminals** to see this example in action.
 
 **Terminal 1: Start the server**
 ```bash
-python myproject/myserver.py --config server_config.json
+python templates/myserver.py --config server_config.json
 ```
 
 **Terminal 2: Run the QuestionAgent**
 ```bash
-python myproject/question_agent.py
+python examples/2_question_answer_agents/question_agent.py
 ```
 
 **Terminal 3: Run the AnswerBot**
 ```bash
-python myproject/answer_bot.py
+python examples/2_question_answer_agents/answer_agent.py
 ```
 
 ### What You Will See
