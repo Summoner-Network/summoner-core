@@ -80,7 +80,7 @@ Once the agents are running, you can begin chatting between them. You can also s
 
 To build a custom agent, start by copying the `templates/` folder and renaming it to something meaningful, such as `myproject/`.
 
-You do not need to modify `myproject/myserver.py`; all agent logic belongs in `myproject/myclient.py`.
+You do not need to modify `templates/myserver.py`; all agent logic belongs in `templates/myclient.py`.
 
 Below is a minimal agent template. You can adjust the `name`, `host`, and `port` to suit your needs:
 
