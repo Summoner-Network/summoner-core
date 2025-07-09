@@ -1,0 +1,7 @@
+OK # equivalent to success
+ acceptable
+ extra_ok  
+ all_good   
+error # equivalent to fail
+ minor  
+ major       

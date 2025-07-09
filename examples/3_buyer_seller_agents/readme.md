@@ -28,6 +28,12 @@ The following animation shows a **real-time exchange** between the BuyerAgent an
 
 You can observe how each agent proposes, counters, and dynamically adjusts their offers before reaching an agreement, or terminating the negotiation.
 
+The BuyerAgent and SellerAgent are designed to handle negotiations in noisy environments where many interactions occur concurrently. The following demo illustrates this by running two sellers and two buyers — resulting in eight simultaneous negotiations—on a single server instance.
+
+<p align="center">
+<img width="800px" src="../../img/2sellers_2buyers.gif" />
+</p>
+
 
 ## Key Features
 

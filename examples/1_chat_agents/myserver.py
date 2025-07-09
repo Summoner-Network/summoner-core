@@ -1,10 +1,8 @@
-import os
-import sys
-import argparse
 from summoner.server import SummonerServer
+import argparse
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run SummonerServer with a specified config.")
+    parser = argparse.ArgumentParser(description="Run a Summoner server with a specified config.")
     parser.add_argument('--config', dest='config_path', required=True, help='The relative path to the config file (JSON) for the server (e.g., --config myproject/server_config.json)')
     args = parser.parse_args()
 

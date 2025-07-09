@@ -27,8 +27,6 @@ else
 
     # Create the .env file
     cat <<EOF > "$SCRIPT_DIR/.env"
-LOG_LEVEL=INFO
-ENABLE_CONSOLE_LOG=true
 DATABASE_URL=postgres://user:pass@localhost:5432/mydb
 SECRET_KEY=supersecret
 EOF
