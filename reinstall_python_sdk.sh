@@ -83,7 +83,11 @@ else
 fi
 
 echo "📦 Installing 'summoner' in editable mode..."
-pip install .
+if $DEV_CORE; then
+  pip install -e .
+else
+  pip install .
+fi
 
 echo "✅ Python SDK reinstalled successfully with prefix: '$PREFIX_FILTER'"
 

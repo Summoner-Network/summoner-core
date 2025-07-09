@@ -1,29 +1,49 @@
 { 
-  "version": "The version of the server implementation (e.g; python, rss, rss_1, rss_2)",
-  "hyper_parameters":
-  {
     "host": "The IP address or hostname your server will bind to (e.g. \"127.0.0.1\" for localhost).",
     "port": "The TCP port number on which the server listens for incoming connections (e.g. 8888).",
-    "connection_buffer_size": "How many inbound connection attempts the OS will queue before refusing new ones. Higher values handle traffic spikes better (default 128).",
-    "command_buffer_size": "Capacity of the channel holding backpressure commands before older commands are dropped (default 32).",
-    "control_channel_capacity": "Buffer size for each client's control commands (throttle/flow-control) (default 8).",
-    "queue_monitor_capacity": "How many backlog-size reports each client can queue before new reports are dropped (default 100).",
-    "client_timeout_secs": "Seconds of client inactivity before the server forcibly disconnects them (default 300s). Set this to `null` or omit the field to disable timeouts and allow idle clients indefinitely.",
-    "rate_limit_msgs_per_minute": "Maximum messages a client may send per minute before being throttled (default 300).",
-    "timeout_check_interval_secs": "How often (in seconds) the server checks all clients for inactivity (default 30s).",
-    "accept_error_backoff_ms": "Milliseconds to wait before retrying `accept()` after an error, to avoid tight loops (default 100ms).",
-    "quarantine_cooldown_secs": "Seconds a client remains in quarantine after a forced disconnect (default 300s).",
-    "quarantine_cleanup_interval_secs": "Seconds between automatic sweeps to remove expired quarantined clients (default 60s).",
-    "throttle_delay_ms": "Delay (in milliseconds) applied when a client is throttled, to slow down message processing (default 200ms).",
-    "flow_control_delay_ms": "Delay (in milliseconds) applied when flow control is active, pausing message handling (default 1000ms).",
-    "worker_threads": "Number of Tokio runtime worker threads to spawn. Default is (number of CPU cores minus one).",
-    "backpressure_policy": {
-      "enable_throttle": "Turn on/off injecting delays when a client exceeds the throttle threshold.",
-      "throttle_threshold": "Number of queued messages before throttling starts (default 100).",
-      "enable_flow_control": "Turn on/off pausing reads when queue size exceeds the flow-control threshold.",
-      "flow_control_threshold": "Number of queued messages before flow control starts (default 300).",
-      "enable_disconnect": "Turn on/off forcefully disconnecting clients under extreme backlog.",
-      "disconnect_threshold": "Number of queued messages before a client is disconnected (default 500)."
+    
+    "version": "The version of the server implementation (e.g. python, rss, rss_1, rss_2)",
+    
+    "logger": {
+        "log_level": "Specifies the minimum level of messages to record (e.g. \"DEBUG\" < \"INFO\" < \"WARNING\" < \"ERROR\" < \"CRITICAL\").",
+        
+        "enable_console_log": "If true, log messages will be written to the console (stdout) using the console log format.",
+        "console_log_format": "Template for formatting console log messages, including ANSI escape codes for coloring (e.g. \"\\\\033[92m%(asctime)s\\\\033[0m - \\\\033[94m%(name)s\\\\033[0m - %(levelname)s - %(message)s\").",
+
+        "enable_file_log": "If true, log messages will be written to rotating log files on disk.",
+        "enable_json_log": "If true, file log entries will be emitted as JSON objects for structured logging.",
+        "log_file_path": "Filesystem directory where log files will be created and rotated.",
+        "log_format": "String template defining how file log messages are formatted (e.g. \"%(asctime)s - %(name)s - %(levelname)s - %(message)s\").",
+
+        "max_file_size": "Maximum size in bytes of a single log file before it is rotated.",
+        "backup_count": "Number of rotated log files to retain before older logs are discarded.",
+        "date_format": "Format string for timestamps in log entries (e.g. \"%Y-%m-%d %H:%M:%S.%f\").",
+        "log_keys": "List of payload fields to include in JSON log files; use null for full payload, [] for no payload, or list specific field names to include."
+    },
+
+    "hyper_parameters": {
+        "connection_buffer_size": "How many inbound connection attempts the OS will queue before refusing new ones. Higher values handle traffic spikes better (default 128).",
+        "command_buffer_size": "Capacity of the channel holding backpressure commands before older commands are dropped (default 32).",
+        "control_channel_capacity": "Buffer size for each client's control commands (throttle/flow-control) (default 8).",
+        "queue_monitor_capacity": "How many backlog-size reports each client can queue before new reports are dropped (default 100).",
+        "client_timeout_secs": "Seconds of client inactivity before the server forcibly disconnects them (default 300s). Set this to `null` or omit the field to disable timeouts and allow idle clients indefinitely.",
+        "rate_limit_msgs_per_minute": "Maximum messages a client may send per minute before being throttled (default 300).",
+        "timeout_check_interval_secs": "How often (in seconds) the server checks all clients for inactivity (default 30s).",
+        "accept_error_backoff_ms": "Milliseconds to wait before retrying `accept()` after an error, to avoid tight loops (default 100ms).",
+        "quarantine_cooldown_secs": "Seconds a client remains in quarantine after a forced disconnect (default 300s).",
+        "quarantine_cleanup_interval_secs": "Seconds between automatic sweeps to remove expired quarantined clients (default 60s).",
+        "throttle_delay_ms": "Delay (in milliseconds) applied when a client is throttled, to slow down message processing (default 200ms).",
+        "flow_control_delay_ms": "Delay (in milliseconds) applied when flow control is active, pausing message handling (default 1000ms).",
+        "worker_threads": "Number of Tokio runtime worker threads to spawn. Default is (number of CPU cores minus one).",
+        
+        "backpressure_policy": {
+        "enable_throttle": "Turn on/off injecting delays when a client exceeds the throttle threshold.",
+        "throttle_threshold": "Number of queued messages before throttling starts (default 100).",
+        "enable_flow_control": "Turn on/off pausing reads when queue size exceeds the flow-control threshold.",
+        "flow_control_threshold": "Number of queued messages before flow control starts (default 300).",
+        "enable_disconnect": "Turn on/off forcefully disconnecting clients under extreme backlog.",
+        "disconnect_threshold": "Number of queued messages before a client is disconnected (default 500)."
+        }
+        
     }
-  }
 }

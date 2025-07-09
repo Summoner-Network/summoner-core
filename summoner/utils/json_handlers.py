@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 def fully_recover_json(data):
     """
@@ -28,7 +28,7 @@ def fully_recover_json(data):
         # Base case: primitive data type
         return data
 
-def load_config(config_path: str, debug: bool = False) -> dict[str, Any]:
+def load_config(config_path: Optional[str], debug: bool = False) -> dict[str, Any]:
     """
     Load a JSON configuration file safely.
 
@@ -40,6 +40,11 @@ def load_config(config_path: str, debug: bool = False) -> dict[str, Any]:
         Dict[str, Any]: Parsed configuration as a dictionary.
                         Returns an empty dict if file does not exist or is invalid.
     """
+    if config_path is None:
+        if debug:
+            print(f"[DEBUG] Config file is `None`")
+        return {}
+    
     path = Path(config_path)
 
     if not path.is_file():

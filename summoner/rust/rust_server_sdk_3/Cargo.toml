@@ -1,0 +1,20 @@
+[package]
+name = "rust_server_sdk_3"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "rust_server_sdk_3"          # ✅ This becomes `import rust_server_sdk_3` in Python
+crate-type = ["cdylib"]             # ✅ Required for Python FFI compatibility via PyO3
+
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module", "auto-initialize"] }     # ✅ Required for Python binding
+tokio = { version = "1.37", features = ["full"] }                                   # ✅ Async IO runtime
+log = "0.4"                                                                         # ✅ Used by fern
+chrono = "0.4"                                                                      # ✅ Timestamps in logs
+fern = { version = "0.6", features = ["colored"] }                                  # ✅ Pretty logger + file support
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+bytes = "1.4"
+num_cpus = "1.13"

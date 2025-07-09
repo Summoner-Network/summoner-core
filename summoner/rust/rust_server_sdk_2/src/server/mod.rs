@@ -693,7 +693,7 @@ async fn broadcast_message(
     // 4) For each client in our snapshot, spawn a small task to write asynchronously.
     //    This way, a slow or stalled client can’t hold up the others.
     for client in snapshot {
-        let writer = client.writer.clone();  // Clone Arc<Mutex<…>> handle
+        let writer = client.writer.clone();  // Clone Arc<Mutex<...>> handle
         let buf = msg_bytes.clone();         // Clone Arc<Bytes> pointer
         let addr = client.addr;              // Capture address for logging
         let log = logger.clone();            // Clone logger handle

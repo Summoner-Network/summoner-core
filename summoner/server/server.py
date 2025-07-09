@@ -16,10 +16,9 @@ from utils import (
     ensure_trailing_newline,
     load_config,
     )
-from logger import setup_logger
-import rust_server_sdk as rss
-import rust_server_sdk_1 as rss_1
+from logger import get_logger, configure_logger, Logger
 import rust_server_sdk_2 as rss_2
+import rust_server_sdk_3 as rss_3
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -40,7 +39,7 @@ class SummonerServer:
     def __init__(self, name: Optional[str] = None):
         # Give a name to the server
         self.name = name if isinstance(name, str) else "<server:no-name>"
-        self.logger = setup_logger(self.name)
+        self.logger: Logger = get_logger(self.name)
 
          # Create a new event loop
         self.loop = asyncio.new_event_loop()
@@ -138,14 +137,25 @@ class SummonerServer:
     def run(self, host='127.0.0.1', port=8888, config_path = ""):
         server_config = load_config(config_path=config_path, debug=True)
 
+        logger_cfg = server_config.get("logger", {})
+        configure_logger(self.logger, logger_cfg)
+
         rust_dispatch = {
-            "rss": lambda h, p: rss.start_tokio_server(self.name, h, p),
-            "rss_1": lambda h, p: rss_1.start_tokio_server(self.name, h, p, None, None, None),
+            
             "rss_2": lambda h, p : rss_2.start_tokio_server(
                 self.name, 
                 {
-                "host":h, 
-                "port":p, 
+                "host": h or server_config.get("host"), 
+                "port": p or server_config.get("port"), 
+                **server_config.get("hyper_parameters", {})
+                }),
+
+            "rss_3": lambda h, p : rss_3.start_tokio_server(
+                self.name, 
+                {
+                "host": h or server_config.get("host"), 
+                "port": p or server_config.get("port"),
+                "logger": server_config.get("logger", {}),
                 **server_config.get("hyper_parameters", {})
                 })
         }

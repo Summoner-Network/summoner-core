@@ -1,28 +1,50 @@
-{
-  "version": "The version of the server implementation (e.g. 'rss', 'rss_1', 'rss_2')",
-  "hyper_parameters": {
+    {
+
     "host": "IP address or hostname to bind (e.g. '127.0.0.1')",
     "port": "TCP port number (e.g. 8888)",
-    "connection_buffer_size": "OS-level backlog size (default 128)",
-    "command_buffer_size": "Backpressure command buffer capacity (default 32)",
-    "control_channel_capacity": "Client control channel buffer size (default 8)",
-    "queue_monitor_capacity": "Queue report buffer capacity per client (default 100)",
-    "client_timeout_secs": "Idle client timeout in seconds (default 300)",
-    "rate_limit_msgs_per_minute": "Max messages per minute (default 300)",
-    "timeout_check_interval_secs": "Interval to check timeouts (default 30)",
-    "accept_error_backoff_ms": "Backoff ms after 'accept' error (default 100)",
-    "quarantine_cooldown_secs": "Quarantine duration in seconds (default 300)",
-    "quarantine_cleanup_interval_secs": "Cleanup interval for quarantine (default 60)",
-    "throttle_delay_ms": "Delay ms when throttling (default 200)",
-    "flow_control_delay_ms": "Delay ms during flow control (default 1000)",
-    "worker_threads": "Number of Tokio threads (default = cores-1)",
-    "backpressure_policy": {
-      "enable_throttle": "Enable throttling when queue > threshold",
-      "throttle_threshold": "Start throttling at this queue length",
-      "enable_flow_control": "Enable flow control when queue > threshold",
-      "flow_control_threshold": "Start flow control at this queue length",
-      "enable_disconnect": "Disconnect clients when queue > threshold",
-      "disconnect_threshold": "Disconnect when queue length exceeds this"
+
+    "version": "The version of the server implementation (e.g. 'rss', 'rss_1', 'rss_2')",
+    
+    "logger": {
+        "log_level": "Minimum log severity (DEBUG < INFO < WARNING < ERROR < CRITICAL)",
+        
+        "enable_console_log": "Enable or disable console (stdout) logging",
+        "console_log_format": "Format string for console logs (supports ANSI color codes)",
+        
+        "enable_file_log": "Enable or disable logging to file",
+        "enable_json_log": "Enable structured JSON logging for file output",
+        "log_file_path": "Directory path where log files are stored",
+        "log_format": "Template for file log message formatting",
+
+        "max_file_size": "Maximum size in bytes before log file rotation",
+        "backup_count": "Number of rotated log files to keep",
+        "date_format": "Timestamp format for log entries",
+        "log_keys": "Fields to include in JSON file logs (null=all, []=none, [fields]=only those)"
+    },
+
+    "hyper_parameters": {
+        "connection_buffer_size": "OS-level backlog size (default 128)",
+        "command_buffer_size": "Backpressure command buffer capacity (default 32)",
+        "control_channel_capacity": "Client control channel buffer size (default 8)",
+        "queue_monitor_capacity": "Queue report buffer capacity per client (default 100)",
+        "client_timeout_secs": "Idle client timeout in seconds (default 300)",
+        "rate_limit_msgs_per_minute": "Max messages per minute (default 300)",
+        "timeout_check_interval_secs": "Interval to check timeouts (default 30)",
+        "accept_error_backoff_ms": "Backoff ms after 'accept' error (default 100)",
+        "quarantine_cooldown_secs": "Quarantine duration in seconds (default 300)",
+        "quarantine_cleanup_interval_secs": "Cleanup interval for quarantine (default 60)",
+        "throttle_delay_ms": "Delay ms when throttling (default 200)",
+        "flow_control_delay_ms": "Delay ms during flow control (default 1000)",
+        "worker_threads": "Number of Tokio threads (default = cores-1)",
+        
+        "backpressure_policy": {
+        "enable_throttle": "Enable throttling when queue > threshold",
+        "throttle_threshold": "Start throttling at this queue length",
+        "enable_flow_control": "Enable flow control when queue > threshold",
+        "flow_control_threshold": "Start flow control at this queue length",
+        "enable_disconnect": "Disconnect clients when queue > threshold",
+        "disconnect_threshold": "Disconnect when queue length exceeds this"
+        }
+
     }
-  }
 }
