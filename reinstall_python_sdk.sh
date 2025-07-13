@@ -30,7 +30,7 @@ echo "✅ Final values: DEV_CORE=$DEV_CORE, PREFIX_FILTER=$PREFIX_FILTER"
 # ─────────────────────────────────────────────────────────────
 # Select venv location
 # ─────────────────────────────────────────────────────────────
-if $DEV_CORE; then
+if [ "$DEV_CORE" = true ]; then
   VENV_DIR="$THIS_SCRIPT/venv"
 else
   VENV_DIR="$ROOT_DIR/venv"
@@ -45,13 +45,16 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
   . "$VENV_DIR/bin/activate"
 else
   echo "❌ Virtualenv not found at: $VENV_DIR"
-  # exit 1
+  exit 1
 fi
 
 # Diagnostic: show interpreter in use
-echo "🐍 Using Python: $(which python)"
-echo "📦 Using Pip:    $(which pip)"
-echo "🔧 Pip version:  $(pip --version)"
+PY=$(which python 2>/dev/null || echo 'not found')
+PIP=$(which pip     2>/dev/null || echo 'not found')
+PV=$(pip --version  2>/dev/null || echo 'not found')
+echo "🐍 Using Python: $PY"
+echo "📦 Using Pip:    $PIP"
+echo "🔧 Pip version:  $PV"
 
 # ─────────────────────────────────────────────────────────────
 # Reinstall Rust crates (optional prefix)
@@ -59,10 +62,10 @@ echo "🔧 Pip version:  $(pip --version)"
 echo "🔁 Reinstalling Rust crates via: $RUST_SCRIPT"
 if [ ! -f "$RUST_SCRIPT" ]; then
   echo "❌ Missing script: $RUST_SCRIPT"
-  # exit 1
+  exit 1
 fi
 
-if $DEV_CORE; then
+if [ "$DEV_CORE" = true ]; then
   bash "$RUST_SCRIPT" "$PREFIX_FILTER" --dev-core
 else
   bash "$RUST_SCRIPT" "$PREFIX_FILTER"
@@ -83,7 +86,7 @@ else
 fi
 
 echo "📦 Installing 'summoner' in editable mode..."
-if $DEV_CORE; then
+if [ "$DEV_CORE" = true ]; then
   pip install -e .
 else
   pip install .
@@ -91,7 +94,7 @@ fi
 
 echo "✅ Python SDK reinstalled successfully with prefix: '$PREFIX_FILTER'"
 
-if $DEV_CORE; then
+if [ "$DEV_CORE" = true ]; then
   echo "   (used --dev-core → venv at $THIS_SCRIPT/venv)"
 else
   echo "   (used default → venv at $ROOT_DIR/venv)"
