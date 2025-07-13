@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# if we got sourced in a non-Bash shell, restart under Bash
+if [ -z "$BASH_VERSION" ]; then
+  exec bash "$0" "$@"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # Resolve paths
 # ─────────────────────────────────────────────────────────────
