@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# if we got sourced in a non-Bash shell, restart under Bash
-if [ -z "$BASH_VERSION" ]; then
-  exec bash "$0" "$@"
-fi
-
 # Exit immediately if a command exits with a non-zero status
 set -e
 
