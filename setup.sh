@@ -1,7 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -euo pipefail
 
 # Check if sourced or executed
 (return 0 2>/dev/null) && SOURCED=1 || SOURCED=0
