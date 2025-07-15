@@ -145,16 +145,16 @@ class SummonerServer:
             "rss_2": lambda h, p : rss_2.start_tokio_server(
                 self.name, 
                 {
-                "host": h or server_config.get("host"), 
-                "port": p or server_config.get("port"), 
+                "host": server_config.get("host") or h, 
+                "port": server_config.get("port") or p, 
                 **server_config.get("hyper_parameters", {})
                 }),
 
             "rss_3": lambda h, p : rss_3.start_tokio_server(
                 self.name, 
                 {
-                "host": h or server_config.get("host"), 
-                "port": p or server_config.get("port"),
+                "host": server_config.get("host") or h, 
+                "port": server_config.get("port") or p,
                 "logger": server_config.get("logger", {}),
                 **server_config.get("hyper_parameters", {})
                 })
