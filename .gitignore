@@ -5,6 +5,7 @@ experiments/
 *.log.[1-9]
 *.mov
 *.db
+*.old
 *.sh.old
 *.py.old
 *.md.old
@@ -15,7 +16,6 @@ img/assets/
 summoner_mock.py
 # Remy: next update
 summoner/kobold/
-summoner/client/merger.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

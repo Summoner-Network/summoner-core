@@ -355,7 +355,7 @@ class StateTape:
         # Figure out what kind of input we have
         tp = StateTape._assess_type(states)
 
-        # Default: empty index‐many
+        # Default: empty index-many
         if tp is None:
             self.states = {}
             self._type  = TapeType.INDEX_MANY
@@ -389,7 +389,7 @@ class StateTape:
             self._type = tp
 
         else:
-            # Should never happen, but safe‐guard
+            # Should never happen, but safe-guard
             raise RuntimeError(f"Unhandled TapeType {tp!r}")
 
     def set_type(self, value: TapeType) -> StateTape:
