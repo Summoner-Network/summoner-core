@@ -3,23 +3,16 @@ from aioconsole import ainput
 from typing import Union
 import argparse
 
-agent = SummonerClient(name="ChatAgent")
+agent = SummonerClient(name="SpellAgent")
 
 @agent.receive(route="custom_receive")
 async def custom_receive(msg: Union[dict,str]) -> None:
-    content = (msg["content"] if isinstance(msg, dict) and "content" in msg else msg) 
+    content = (msg["content"] if isinstance(msg, dict) and "content" in msg else msg)
     tag = ("\r[From server]" if isinstance(content, str) and content[:len("Warning:")] == "Warning:" else "\r[Received]")
-    print(tag, content, flush=True)
-    if content == "/travel":
-        await agent.travel_to(host = "192.168.1.229", port = 8888)
-        return None
-    elif content == "/quit":
-        await agent.quit()
-        return None
-    elif content == "/go_home":
-        await agent.travel_to(host = agent.default_host, port = agent.default_port)
-        return None
-    print("r> ", end="", flush=True)
+    if content == "I am back" or tag == "\r[From server]":
+        print(tag, content, flush=True)
+        print("r> ", end="", flush=True)
+
 
 @agent.send(route="custom_send")
 async def custom_send() -> str:

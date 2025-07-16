@@ -459,7 +459,7 @@ async fn handle_connection(
 /// - Enforces inactivity timeouts  
 /// - Sends a shutdown notice on server exit  
 async fn handle_client_messages(
-    // Line‐based reader for this client’s incoming data
+    // Line-based reader for this client’s incoming data
     reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
     // Metadata and writer handle for this client
     sender: &Client,
@@ -467,7 +467,7 @@ async fn handle_client_messages(
     clients: &ClientList,
     // Receiver for the server’s global shutdown signal
     shutdown_rx: &mut broadcast::Receiver<()>,
-    // Channel to report our outgoing‐queue length for backpressure
+    // Channel to report our outgoing-queue length for backpressure
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
     // How long before we drop an idle client
     timeout: Option<Duration>,
@@ -638,7 +638,7 @@ async fn process_client_line(
         return;
     }
 
-    // 2) Log the cleaned‐up message (no trailing newline)
+    // 2) Log the cleaned-up message (no trailing newline)
     let clean = remove_last_newline(&line);
     logger.info(&format!("📨 From {}: {}", sender.addr, clean));
 
