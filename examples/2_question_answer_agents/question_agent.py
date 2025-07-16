@@ -11,22 +11,25 @@ QUESTIONS = [
 ]
 
 tracker_lock = asyncio.Lock()
-tracker = {"count": 0}
+tracker = 0
 
 agent = SummonerClient(name="QuestionAgent")
 
-@agent.receive(route="")
+@agent.receive(route="effect")
 async def receive_response(msg: Union[str, dict]) -> None:
+    global tracker
     content = msg["content"] if isinstance(msg, dict) else msg
     print(f"Received: {content}")
     if content != "waiting":
         async with tracker_lock:
-            tracker["count"] += 1
+            tracker += 1
 
-@agent.send(route="")
+@agent.send(route="effect")
 async def send_question() -> str:
+    global tracker
     await asyncio.sleep(2)
-    return QUESTIONS[tracker["count"] % len(QUESTIONS)]
+    async with tracker_lock:
+        return QUESTIONS[tracker % len(QUESTIONS)]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a Summoner client with a specified config.")

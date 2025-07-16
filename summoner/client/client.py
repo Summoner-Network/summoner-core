@@ -127,6 +127,12 @@ class SummonerClient:
         self.receiving_hooks: dict[tuple[int,...], Callable[[Union[str, dict]], Union[str, dict]]] = {}
         self.hooks_lock = asyncio.Lock()
 
+        # ─── DNA capture for merging ─────────────────────────────────────────
+        # lists of dicts, each entry records one decorated handler
+        self._dna_receivers: list[dict] = []
+        self._dna_senders:   list[dict] = []
+        self._dna_hooks:     list[dict] = []
+
     # ==== VERSION SPECIFIC ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
@@ -222,6 +228,8 @@ class SummonerClient:
 
             self._upload_states = fn
 
+            return fn
+
         return decorator
 
     def download_states(self):
@@ -254,6 +262,8 @@ class SummonerClient:
                 self.logger.warning("@download_states handler overwritten")
 
             self._download_states = fn
+
+            return fn
 
         return decorator
     
@@ -307,6 +317,15 @@ class SummonerClient:
             else:
                 raise ValueError(f"Priority must be an integer or a tuple of integers (got type {type(priority).__name__}: {priority!r})")
 
+            # ----[ DNA capture ]----
+            self._dna_hooks.append({
+                "fn": fn,
+                "direction": direction,
+                "priority": tuple_priority,
+                "source": inspect.getsource(fn),
+            })
+
+
             # ----[ Registration Code ]----
             async def register():
                 async with self.hooks_lock:
@@ -318,6 +337,8 @@ class SummonerClient:
             # ----[ Safe Registration ]----
             # NOTE: register() is run ASAP and _registration_tasks is used to wait all registrations before run_client()
             self._schedule_registration(register())
+
+            return fn
 
         return decorator
 
@@ -358,6 +379,14 @@ class SummonerClient:
             else:
                 raise ValueError(f"Priority must be an integer or a tuple of integers (got type {type(priority).__name__}: {priority!r})")
 
+            # ----[ DNA capture ]----
+            self._dna_receivers.append({
+                "fn": fn,
+                "route": route,
+                "priority": tuple_priority,
+                "source": inspect.getsource(fn),  # optional, for text serialization
+            })
+
             # ----[ Registration Code ]----
             async def register():
                 receiver = Receiver(fn=fn, priority=tuple_priority)
@@ -378,6 +407,8 @@ class SummonerClient:
 
             # ----[ Safe Registration ]----
             self._schedule_registration(register())
+
+            return fn
 
         return decorator
     
@@ -436,6 +467,16 @@ class SummonerClient:
             ):
                 raise TypeError(f"Argument `on_actions` must be `None` or a set of Action event classes: {{Action.MOVE, Action.STAY, Action.TEST}}. Provided: {on_actions!r}")
             
+            # ----[ DNA capture ]----
+            self._dna_senders.append({
+                "fn": fn,
+                "route": route,
+                "multi": multi,
+                "on_triggers": on_triggers,
+                "on_actions": on_actions,
+                "source": inspect.getsource(fn),
+            })
+
             # ----[ Registration Code ]----
             async def register():
                 
@@ -461,7 +502,58 @@ class SummonerClient:
             # NOTE: register() is run ASAP and _registration_tasks is used to wait all registrations before run_client()
             self._schedule_registration(register())
 
+            return fn
+
         return decorator
+
+    # ==== DNA PROCESSING ====
+
+    def dna(self) -> str:
+        """
+        Serialize this client's handlers into a JSON string.
+        Each entry captures:
+          - type: "receive" | "send" | "hook"
+          - decorator parameters (route, priority, etc.)
+          - source: the full text of the async function
+        """
+        entries = []
+
+        # 1) Receivers
+        for dna in self._dna_receivers:
+            entries.append({
+                "type":    "receive",
+                "route":   dna["route"],
+                "priority": dna["priority"],
+                "source":  inspect.getsource(dna["fn"]),
+                "module":   dna["fn"].__module__,
+                "fn_name":  dna["fn"].__name__,
+            })
+
+        # 2) Senders
+        for dna in self._dna_senders:
+            entries.append({
+                "type":        "send",
+                "route":       dna["route"],
+                "multi":       dna["multi"],
+                "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
+                "on_actions":  [a.__name__ for a in (dna["on_actions"] or [])],
+                "source":      inspect.getsource(dna["fn"]),
+                "module":   dna["fn"].__module__,
+                "fn_name":  dna["fn"].__name__,
+            })
+
+        # 3) Hooks
+        for dna in self._dna_hooks:
+            entries.append({
+                "type":     "hook",
+                "direction": dna["direction"].name,
+                "priority": dna["priority"],
+                "source":   inspect.getsource(dna["fn"]),
+                "module":   dna["fn"].__module__,
+                "fn_name":  dna["fn"].__name__,
+            })
+
+        return json.dumps(entries)
 
     # ==== RECEIVER EXECUTION ====
 

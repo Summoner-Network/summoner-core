@@ -474,7 +474,7 @@ async fn handle_connection(
 /// - Enforces inactivity timeouts  
 /// - Sends a shutdown notice on server exit  
 async fn handle_client_messages(
-    // Line‐based reader for this client’s incoming data
+    // Line-based reader for this client’s incoming data
     reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
     // Metadata and writer handle for this client
     sender: &Client,
@@ -482,7 +482,7 @@ async fn handle_client_messages(
     clients: &ClientList,
     // Receiver for the server’s global shutdown signal
     shutdown_rx: &mut broadcast::Receiver<()>,
-    // Channel to report our outgoing‐queue length for backpressure
+    // Channel to report our outgoing-queue length for backpressure
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
     // How long before we drop an idle client
     timeout: Option<Duration>,
@@ -663,12 +663,12 @@ async fn process_client_line(
     });
     let payload_text = payload_value.to_string();
 
-    // 3) Log—JSON‐mode or plain‐text fallback
+    // 3) Log—JSON-mode or plain-text fallback
     if config.logger.enable_json_log {
         // JSON path: init_logger will parse & filter by log_keys
         logger.info(&payload_text);
     } else {
-        // Plain‐text path
+        // Plain-text path
         logger.info(&format!("📨 From {}: {}", sender.addr, clean));
     }
 
