@@ -18,7 +18,7 @@ async def custom_receive(msg: Union[dict,str]) -> None:
 async def custom_send() -> str:
     content = await ainput("s> ")
     if content == "/self.travel":
-        await agent.travel_to(host = "192.168.1.229", port = 8888)
+        await agent.travel_to(host = "testnet.summoner.org", port = 8888)
         return None
     elif content == "/self.quit":
         await agent.quit()
