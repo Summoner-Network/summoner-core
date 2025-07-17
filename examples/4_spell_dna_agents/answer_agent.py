@@ -37,4 +37,4 @@ if __name__ == "__main__":
     parser.add_argument('--config', dest='config_path', required=False, help='The relative path to the config file (JSON) for the client (e.g., --config myproject/client_config.json)')
     args = parser.parse_args()
 
-    agent.run(host = "192.168.1.229", port = 8888, config_path=args.config_path)
+    agent.run(host = "testnet.summoner.org", port = 8888, config_path=args.config_path)
