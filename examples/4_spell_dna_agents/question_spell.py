@@ -47,7 +47,7 @@ async def custom_receive(msg: Union[dict,str]) -> None:
     tag = ("\r[From server]" if isinstance(msg, str) and msg[:len("Warning:")] == "Warning:" else "\r[Received]")
     print(tag, msg, flush=True)
     if msg == "/travel":
-        await agent.travel_to(host = "192.168.1.229", port = 8888)
+        await agent.travel_to(host = "testnet.summoner.org", port = 8888)
         return Move(Trigger.ok)
     elif msg == "/quit":
         await agent.quit()
