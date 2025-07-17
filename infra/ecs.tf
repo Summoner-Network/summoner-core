@@ -49,6 +49,7 @@ resource "aws_ecs_service" "splt" {
   task_definition = aws_ecs_task_definition.splt.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets         = [for s in aws_subnet.public : s.id]

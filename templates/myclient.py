@@ -18,4 +18,4 @@ if __name__ == "__main__":
         content = await ainput("s> ")
         return content
 
-    myagent.run(host = "127.0.0.1", port = 8888)
+    myagent.run(host = "http://testnet.summoner.org", port = 8888)
