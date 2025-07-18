@@ -14,6 +14,7 @@ import signal
 import inspect
 from json import JSONDecodeError
 from collections import defaultdict
+import platform
 
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
@@ -1061,8 +1062,9 @@ class SummonerClient:
             - SIGINT: interupt signal for Ctrl+C | value = 2
             - SIGTERM: system/process-based termination | value = 15
         """
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            self.loop.add_signal_handler(sig, lambda: self.shutdown())
+        if platform.system() != "Windows":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def _wait_for_registration(self):
         """
