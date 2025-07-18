@@ -4,6 +4,8 @@ import os
 import sys
 import json
 from typing import Optional
+import platform
+import importlib
 
 # Setup path
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -17,8 +19,11 @@ from utils import (
     load_config,
     )
 from logger import get_logger, configure_logger, Logger
-import rust_server_sdk_2 as rss_2
-import rust_server_sdk_3 as rss_3
+# import rust_server_sdk_2 as rss_2
+# import rust_server_sdk_3 as rss_3
+if platform.system() != "Windows":
+    rss_2 = importlib.import_module("rust_server_sdk_2")
+    rss_3 = importlib.import_module("rust_server_sdk_3")
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -118,8 +123,9 @@ class SummonerServer:
     def set_termination_signals(self):
         # SIGINT = interupt signal for Ctrl+C | value = 2
         # SIGTERM = system/process-based termination | value = 15
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            self.loop.add_signal_handler(sig, lambda: self.shutdown())
+        if platform.system() != "Windows":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def run_server(self, host: str = '127.0.0.1', port: int = 8888):
         server = await asyncio.start_server(self.handle_client, host=host, port=port)
@@ -139,42 +145,42 @@ class SummonerServer:
 
         logger_cfg = server_config.get("logger", {})
         configure_logger(self.logger, logger_cfg)
-
-        rust_dispatch = {
-            
-            "rss_2": lambda h, p : rss_2.start_tokio_server(
-                self.name, 
-                {
-                "host": server_config.get("host") or h, 
-                "port": server_config.get("port") or p, 
-                **server_config.get("hyper_parameters", {})
-                }),
-
-            "rss_3": lambda h, p : rss_3.start_tokio_server(
-                self.name, 
-                {
-                "host": server_config.get("host") or h, 
-                "port": server_config.get("port") or p,
-                "logger": server_config.get("logger", {}),
-                **server_config.get("hyper_parameters", {})
-                })
-        }
-
-        option = server_config.get("version", None)
-        if option in rust_dispatch:
-            try:
-                rust_dispatch[option](host, port)
-            except KeyboardInterrupt:
-                pass
-            return
         
-        else:
-            try:
-                self.set_termination_signals()
-                self.loop.run_until_complete(self.run_server(host=host, port=port))
-            except (asyncio.CancelledError, KeyboardInterrupt):
-                pass
-            finally:
-                self.loop.run_until_complete(self.wait_for_tasks_to_finish())
-                self.loop.close()
-                self.logger.info("Server exited cleanly.")
+        if platform.system() != "Windows":
+            rust_dispatch = {
+                
+                "rss_2": lambda h, p : rss_2.start_tokio_server(
+                    self.name, 
+                    {
+                    "host": server_config.get("host") or h, 
+                    "port": server_config.get("port") or p, 
+                    **server_config.get("hyper_parameters", {})
+                    }),
+
+                "rss_3": lambda h, p : rss_3.start_tokio_server(
+                    self.name, 
+                    {
+                    "host": server_config.get("host") or h, 
+                    "port": server_config.get("port") or p,
+                    "logger": server_config.get("logger", {}),
+                    **server_config.get("hyper_parameters", {})
+                    })
+            }
+
+            option = server_config.get("version", None)
+            if option in rust_dispatch:
+                try:
+                    rust_dispatch[option](host, port)
+                except KeyboardInterrupt:
+                    pass
+                return
+        
+        try:
+            self.set_termination_signals()
+            self.loop.run_until_complete(self.run_server(host=host, port=port))
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        finally:
+            self.loop.run_until_complete(self.wait_for_tasks_to_finish())
+            self.loop.close()
+            self.logger.info("Server exited cleanly.")
