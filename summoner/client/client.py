@@ -303,7 +303,7 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@hook",
-                allow_param=(type(None), str, dict),
+                allow_param=(Any, str, dict),
                 allow_return=(type(None), str, dict),
                 logger=self.logger,
             )
@@ -365,7 +365,7 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@receive",
-                allow_param=(str, dict),
+                allow_param=(Any, str, dict),
                 allow_return=(type(None), Event),
                 logger=self.logger,
             )
