@@ -20,13 +20,13 @@ target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__fil
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
-from utils import (
+from summoner.utils import (
     remove_last_newline,
     ensure_trailing_newline,
     fully_recover_json,
     load_config,
     )
-from logger import get_logger, configure_logger, Logger
+from summoner.logger import get_logger, configure_logger, Logger
 from summoner.protocol.triggers import (
     Signal, 
     Event, 
