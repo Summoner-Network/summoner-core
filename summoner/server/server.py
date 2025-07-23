@@ -13,12 +13,12 @@ if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
 # Imports
-from utils import (
+from summoner.utils import (
     remove_last_newline, 
     ensure_trailing_newline,
     load_config,
     )
-from logger import get_logger, configure_logger, Logger
+from summoner.logger import get_logger, configure_logger, Logger
 # import rust_server_sdk_2 as rss_2
 # import rust_server_sdk_3 as rss_3
 if platform.system() != "Windows":
