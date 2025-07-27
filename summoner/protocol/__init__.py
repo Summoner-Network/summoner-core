@@ -1,7 +1,10 @@
 from .triggers import (
     Signal, 
     Event, 
-    Action
+    Action,
+    Move,
+    Stay,
+    Test,
     )
 from .process import (
     StateTape, 
@@ -12,4 +15,4 @@ from .process import (
     Direction,
     )
 from .flow import Flow
-from .validation import hook_priority_order, _check_param_and_return
+# from .validation import hook_priority_order, _check_param_and_return
