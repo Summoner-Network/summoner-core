@@ -17,7 +17,7 @@ agent = SummonerClient(name="AnswerBot")
 @agent.receive(route="effect")
 async def handle_question(msg: Union[str, dict]) -> None:
     content = (msg["content"] if isinstance(msg, dict) else msg)
-    addr = (msg["addr"] if isinstance(msg, dict) else "")
+    addr = (msg["remote_addr"] if isinstance(msg, dict) else "")
     print(f"Received: {content}")
     if content in ANSWERS:
         async with track_lock:

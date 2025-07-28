@@ -19,57 +19,40 @@ use std::sync::OnceLock;
 // Import your `LoggerConfig` (parsed from the Python dict) for all user settings
 use crate::config::LoggerConfig;
 
-/// Given a raw JSON string and an optional whitelist of keys,
-/// parse it, prune the nested `content` object by `keys`, then
-/// re-serialize back to a string (for console/plain-text uses).
-fn prune_content_string(raw: &str, keys: &Option<Vec<String>>) -> String {
-    match serde_json::from_str::<JsonValue>(raw) {
-        Ok(mut v) => {
-            if let Some(map) = v.as_object_mut() {
-                if let (Some(JsonValue::String(inner_raw)), Some(keys)) =
-                    (map.get("content"), keys)
-                {
-                    if let Ok(mut inner_v) = serde_json::from_str::<JsonValue>(inner_raw) {
-                        if let Some(inner_map) = inner_v.as_object_mut() {
-                            inner_map.retain(|k, _| keys.contains(k));
-                        }
-                        let new_inner =
-                            serde_json::to_string(&inner_v).unwrap_or_else(|_| inner_raw.clone());
-                        map.insert("content".to_string(), JsonValue::String(new_inner));
-                    }
-                }
-            }
-            serde_json::to_string(&v).unwrap_or_else(|_| raw.to_string())
-        }
-        Err(_) => raw.to_string(),
+/// Given the *parsed* content (a JSON value) and an optional
+/// whitelist of keys, prune its `_payload` and `_type` sub-objects
+/// if `keys` is Some, then return the resulting JsonValue.
+/// This consumes `content`, so no cloning is needed by the caller.
+pub fn prune_content_value(
+    mut content: JsonValue,
+    keys: &Option<Vec<String>>,
+) -> JsonValue {
+    // 1) Early return if not an object or no keys to filter
+    let obj = match content.as_object_mut() {
+        Some(m) if keys.is_some() => m,
+        _ => return content,
+    };
+    let keys = keys.as_ref().unwrap();
+
+    // 2) Build a fresh map with version + filtered sub-objects
+    let mut out = serde_json::Map::new();
+    if let Some(v) = obj.get("_version") {
+        out.insert("_version".into(), v.clone());
     }
+    for field in &["_payload", "_type"] {
+        if let Some(JsonValue::Object(sub)) = obj.get(*field) {
+            let filtered = sub
+                .iter()
+                .filter(|(k, _)| keys.contains(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            out.insert(field.to_string(), JsonValue::Object(filtered));
+        }
+    }
+
+    JsonValue::Object(out)
 }
 
-/// Given a raw JSON string and an optional whitelist of keys,
-/// parse it, prune the nested `content` object by `keys`, then
-/// return a `JsonValue` so it can be embedded unescaped.
-fn prune_payload(raw: &str, keys: &Option<Vec<String>>) -> JsonValue {
-    match serde_json::from_str::<JsonValue>(raw) {
-        Ok(mut v) => {
-            if let Some(map) = v.as_object_mut() {
-                if let (Some(JsonValue::String(inner_raw)), Some(keys)) =
-                    (map.get("content"), keys)
-                {
-                    if let Ok(mut inner_v) = serde_json::from_str::<JsonValue>(inner_raw) {
-                        if let Some(inner_map) = inner_v.as_object_mut() {
-                            inner_map.retain(|k, _| keys.contains(k));
-                        }
-                        let new_inner =
-                            serde_json::to_string(&inner_v).unwrap_or_else(|_| inner_raw.clone());
-                        map.insert("content".to_string(), JsonValue::String(new_inner));
-                    }
-                }
-            }
-            v
-        }
-        Err(_) => JsonValue::String(raw.to_string()),
-    }
-}
 
 /// A simple Logger struct that wraps logging functions.
 /// Clonable to allow use across multiple threads/tasks.
@@ -123,7 +106,6 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
 
         // ────────────────────────────────────────────────────────────────
         // 3) Console branch: if enabled, add a sub-dispatch that
-        //    - filters nested JSON content by log_keys
         //    - formats with timestamp, name, level, message (with ANSI colors)
         //    - pipes output to stdout
         // ────────────────────────────────────────────────────────────────
@@ -132,28 +114,20 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
             let nm = name.to_string();
             // let fmt = cfg.console_log_format.clone();
             let datefmt = cfg.date_format.clone();
-            let enable_json = cfg.enable_json_log;
-            let keys = cfg.log_keys.clone();
 
             // Format used for terminal logs
             let log_format_console = move |out: fern::FormatCallback, message: &std::fmt::Arguments, record: &log::Record| {
                 // 1) Raw payload text
-                let raw = message.to_string();
+                // let raw = message.to_string();
+                // let message_json: JsonValue = serde_json::from_str(&raw).unwrap_or(JsonValue::String(raw.clone()));
 
-                // 2) Use our helper to prune nested content if JSON or whitelist is active
-                let filtered = if enable_json || keys.is_some() {
-                    prune_content_string(&raw, &keys)
-                } else {
-                    raw.clone()
-                };
-
-                // 3) Finally print to console with ANSI coloring
+                // 2) Finally print to console with ANSI coloring
                 out.finish(format_args!(
                     "\x1b[92m{}\x1b[0m - \x1b[94m{}\x1b[0m - {} - {}",
                     Local::now().format(&datefmt),
                     nm,
                     record.level(),
-                    filtered
+                    message
                 ))
             };
 
@@ -167,9 +141,8 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
 
         // ────────────────────────────────────────────────────────────────
         // 4) File branch: if enabled, add a sub-dispatch that
-        //    a) optionally filters JSON payloads by `log_keys`
-        //    b) emits either structured JSON or plain text lines
-        //    c) writes to a file at "<log_file_path>/<name>.log"
+        //    - emits either structured JSON or plain text lines
+        //    - writes to a file at "<log_file_path>/<name>.log"
         // ────────────────────────────────────────────────────────────────
         if cfg.enable_file_log {
             // Ensure the directory exists (no-op if empty or already present)
@@ -182,7 +155,6 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
             // let fmt = cfg.log_format.clone();
             let datefmt = cfg.date_format.clone();
             let enable_json = cfg.enable_json_log;
-            let keys = cfg.log_keys.clone();
 
             // Compute the logfile path
             let filepath = if cfg.log_file_path.is_empty() {
@@ -200,16 +172,14 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                 if enable_json {
                     // 1) Raw payload text
                     let raw = message.to_string();
+                    let message_json: JsonValue = serde_json::from_str(&raw).unwrap_or(JsonValue::String(raw.clone()));
 
-                    // 2) Parse & prune nested "content" into a JsonValue
-                    let pruned = prune_payload(&raw, &keys);
-
-                    // 3) Build a real JSON envelope with "message" as an object
+                    // 2) Build a real JSON envelope with "message" as an object
                     let envelope = serde_json::json!({
                         "timestamp": Local::now().format(&datefmt).to_string(),
                         "name":      nm,
                         "level":     record.level().to_string(),
-                        "message":   pruned
+                        "message":   message_json
                     });
 
                     // 4) Emit the envelope unescaped
@@ -226,7 +196,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                 }
             };
 
-            // Attempt to open the logfile, but don’t panic—fallback to sink on error
+            // Attempt to open the logfile, but don't panic—fallback to sink on error
             let file_output: Box<dyn io::Write + Send> = match fern::log_file(&filepath) {
                 Ok(fh) => Box::new(fh),
                 Err(err) => {
