@@ -278,7 +278,7 @@ class ParsedRoute:
 
     def activated_nodes(
         self,
-        event: Event
+        event: Optional[Event],
     ) -> tuple[Node, ...]:
         """
         Given an event of type Action.*, return the Nodes
@@ -411,7 +411,7 @@ class StateTape:
         if isinstance(states, dict):
             # all values are scalar → INDEX_SINGLE
             if all(
-                isinstance(k, str)
+                isinstance(k, (str, type(None)))
                 and isinstance(v, (str, Node))
                 for k, v in states.items()
             ):
@@ -419,7 +419,7 @@ class StateTape:
 
             # all values are either scalar or sequence of scalars → INDEX_MANY
             if all(
-                isinstance(k, str)
+                isinstance(k, (str, type(None)))
                 and (
                     isinstance(v, (str, Node))
                     or (
@@ -436,9 +436,9 @@ class StateTape:
     def _add_prefix(self, key: str, with_prefix: bool = True) -> str:
         return f"{self.prefix}:{key}" if with_prefix else key
 
-    def _remove_prefix(self, key: str) -> str:
+    def _remove_prefix(self, key: Optional[str]) -> str:
         p = f"{self.prefix}:"
-        return key[len(p):] if key.startswith(p) else key
+        return key[len(p):] if isinstance(key, str) and key.startswith(p) else key
 
     def extend(self, states: Any):
         # Delegate to a local StateTape then merge

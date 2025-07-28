@@ -175,7 +175,7 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
 
-    # 1) Set the logger’s level once
+    # 1) Set the logger's level once
     log_level = getattr(logging, logger_cfg.get("log_level", "DEBUG").upper(), logging.DEBUG)
     logger.setLevel(log_level)
 

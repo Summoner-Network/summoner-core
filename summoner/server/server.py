@@ -87,7 +87,7 @@ class SummonerServer:
                 # Iterate over the snapshot to avoid concurrency issues without long-held locks
                 for other_writer in clients_snapshot:
                     if other_writer != writer:
-                        payload = json.dumps({'addr': addr, 'content': remove_last_newline(message)})
+                        payload = json.dumps({"remote_addr": addr, "content": remove_last_newline(message)})
                         other_writer.write(ensure_trailing_newline(payload).encode())
                         await other_writer.drain()
         

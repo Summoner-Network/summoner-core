@@ -273,7 +273,7 @@ class ClientTranslation(SummonerClient):
         # 3) wait for in-flight handlers & workers
         await self._wait_for_tasks_to_finish()
 
-        # 4) stop the loop so run_client’s run_until_complete can finish
+        # 4) stop the loop so run_client's run_until_complete can finish
         self.loop.stop()
 
     def shutdown(self):
@@ -286,7 +286,7 @@ class ClientTranslation(SummonerClient):
             # Schedule the async shutdown helper
             asyncio.create_task(self._async_shutdown())
         except RuntimeError:
-            # if the loop isn’t running, ignore
+            # if the loop isn't running, ignore
             pass
     
     async def quit(self):

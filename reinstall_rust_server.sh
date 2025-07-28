@@ -71,7 +71,7 @@ echo "🔍 Searching for Rust crates in: $RUST_DIR (prefix='$PREFIX_FILTER')"
 for DIR in "$RUST_DIR"/*/; do
   BASENAME="$(basename "$DIR")"
 
-  # skip if it doesn’t match the optional prefix
+  # skip if it doesn't match the optional prefix
   if [[ -n "$PREFIX_FILTER" && "$BASENAME" != "$PREFIX_FILTER"* ]]; then
     echo "🚫 Skipping $BASENAME"
     continue

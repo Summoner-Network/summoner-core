@@ -16,6 +16,7 @@ img/assets/
 summoner_mock.py
 # Remy: next update
 summoner/kobold/
+test_logs.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

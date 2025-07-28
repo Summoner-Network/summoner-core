@@ -20,7 +20,7 @@ pub struct BackpressurePolicy {
     // How many queued messages trigger throttling
     pub throttle_threshold: usize,
 
-    // If true, we pause reading from a client when they’re too chatty
+    // If true, we pause reading from a client when they're too chatty
     pub enable_flow_control: bool,
     // How many queued messages trigger flow control
     pub flow_control_threshold: usize,
@@ -82,7 +82,7 @@ pub struct ServerConfig {
     /// Logger configuration (text/JSON, file rotation, key filtering, etc.)
     pub logger: LoggerConfig,
     
-    /// How many incoming connections we’ll buffer before backpressure
+    /// How many incoming connections we'll buffer before backpressure
     pub connection_buffer_size: usize,
     
     /// Seconds before we drop an idle client
@@ -199,7 +199,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
             // If it's a dict, use it
             Some(obj) => match obj.downcast::<PyDict>() {
                 Ok(downcasted) => downcasted.clone(),
-                // If it wasn’t a dict, reuse the top-level dict to get defaults
+                // If it wasn't a dict, reuse the top-level dict to get defaults
                 Err(_) => dict.clone(),
             },
             // No key: reuse the top-level dict for defaults
