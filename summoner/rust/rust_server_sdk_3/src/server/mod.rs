@@ -5,10 +5,10 @@ use std::net::SocketAddr;
 
 // Arc is an atomic reference counter for shared ownership across threads/tasks.
 // Mutex provides safe, asynchronous locking for mutable data.
-// We’ll use Arc<Mutex<...>> to share a client’s writer handle safely.
+// We'll use Arc<Mutex<...>> to share a client's writer handle safely.
 use std::sync::Arc;
 
-// Tokio’s non-blocking TCP listener and stream for incoming/outgoing connections.
+// Tokio's non-blocking TCP listener and stream for incoming/outgoing connections.
 use tokio::net::{TcpListener, TcpStream};
 
 // Utilities for buffered, line-by-line asynchronous I/O on TCP streams.
@@ -25,9 +25,9 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio::time::{self, Duration, Instant};
 
 // Macro for building JSON payloads when broadcasting client messages.
-use serde_json::json;
+use serde_json::{json, Value as JsonValue};
 
-// Clone-on-write string type: avoids extra allocations when we don’t modify the string.
+// Clone-on-write string type: avoids extra allocations when we don't modify the string.
 use std::borrow::Cow;
 
 // Reference-counted byte buffer: enables zero-copy sharing of message data.
@@ -46,12 +46,12 @@ mod quarantine;     // temporary client bans
 use crate::config::ServerConfig;
 
 // Logger utility to record informational and error messages.
-use crate::logger::Logger;
+use crate::logger::{Logger, prune_content_value};
 
 // Backpressure commands and helper to spawn the backpressure monitoring task.
 use crate::server::backpressure::{BackpressureCommand, ClientCommand, spawn_backpressure_monitor};
 
-// Token-bucket-style rate limiter for each client’s message flow.
+// Token-bucket-style rate limiter for each client's message flow.
 use crate::server::ratelimiter::RateLimiter;
 
 // Quarantine list for tracking and expiring banned clients over time.
@@ -63,14 +63,14 @@ use crate::server::quarantine::QuarantineList;
 // Represents one connected client. Cloning this struct is cheap (Arc + channel).
 #[derive(Clone)]
 pub struct Client {
-    // The client’s socket address (used for logging and identification).
+    // The client's socket address (used for logging and identification).
     pub addr: SocketAddr,
 
     // The write-half of the TCP stream, wrapped in Arc<Mutex<...>> so multiple tasks
     // can safely send data to this client without data races.
     pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
 
-    // Channel to send per-client control commands (throttle, flow-control) to that client’s task.
+    // Channel to send per-client control commands (throttle, flow-control) to that client's task.
     pub control_tx: mpsc::Sender<ClientCommand>,
 }
 
@@ -241,7 +241,7 @@ async fn accept_connections(
 
             // 3) A global shutdown signal arrived (e.g. Ctrl+C)
             _ = shutdown_rx.recv() => {
-                // Log that we’re beginning graceful shutdown
+                // Log that we're beginning graceful shutdown
                 logger.info("🧹 Server received shutdown signal.");
                 // Break out of the loop so run_server can clean up
                 break;
@@ -342,7 +342,7 @@ async fn handle_new_connection(
         }
     }
 
-    // 3) Disable Nagle’s algorithm to reduce latency (small packets go out immediately)
+    // 3) Disable Nagle's algorithm to reduce latency (small packets go out immediately)
     if let Err(e) = stream.set_nodelay(true) {
         logger.warn(&format!("⚠️  Failed to set TCP_NODELAY for {}: {}", addr, e));
     }
@@ -407,7 +407,7 @@ async fn handle_new_connection(
 
 }
 
-/// Manages a single client’s session:
+/// Manages a single client's session:
 /// - Reads incoming lines and applies rate limiting
 /// - Reports backpressure without blocking
 /// - Enforces inactivity timeouts and graceful shutdown
@@ -474,13 +474,13 @@ async fn handle_connection(
 /// - Enforces inactivity timeouts  
 /// - Sends a shutdown notice on server exit  
 async fn handle_client_messages(
-    // Line-based reader for this client’s incoming data
+    // Line-based reader for this client's incoming data
     reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
     // Metadata and writer handle for this client
     sender: &Client,
     // Shared list of all clients, used for broadcasting
     clients: &ClientList,
-    // Receiver for the server’s global shutdown signal
+    // Receiver for the server's global shutdown signal
     shutdown_rx: &mut broadcast::Receiver<()>,
     // Channel to report our outgoing-queue length for backpressure
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
@@ -546,7 +546,7 @@ async fn handle_client_messages(
                 apply_client_command(cmd, sender, config, logger).await;
             }
 
-            // 3) It’s time to report our queue size for backpressure
+            // 3) It's time to report our queue size for backpressure
             Some(queue_size) = queue_rx.recv() => {
                 // Clone what we need into a small async task to avoid blocking
                 let addr = sender.addr;
@@ -598,7 +598,7 @@ async fn handle_client_messages(
     Ok(())
 }
 
-/// Responds to a throttle or flow-control command by pausing the client’s processing
+/// Responds to a throttle or flow-control command by pausing the client's processing
 ///
 /// # Behavior
 /// - `Throttle`: wait `throttle_delay_ms` before handling the next message  
@@ -622,19 +622,19 @@ async fn apply_client_command(
     }
 }
 
-/// Handle one line of client input:
-/// 1. Apply rate limiting (drop or warn if too fast)
-/// 2. Log the incoming message once (without the trailing newline)
-/// 3. Build a JSON payload for the message
-/// 4. Broadcast it to all other clients
+/// Processes a single client message:
+/// - Enforces per-client rate limiting
+/// - Logs the message with optional privacy filtering
+/// - Broadcasts the original message to all other clients
 ///
 /// # Parameters
-/// - `line`: the raw line read (may include `\n`)  
-/// - `sender`: who sent it (for logging and filtering)  
-/// - `clients`: current active clients to broadcast to  
-/// - `rate_limiter`: per-client rate limiter  
-/// - `queue_tx`: channel to report broadcast queue size (for backpressure)  
-/// - `logger`: for recording events  
+/// - `line`: raw input from the client (may include a trailing newline)
+/// - `sender`: the client who sent this message
+/// - `clients`: the list of active clients for broadcasting
+/// - `rate_limiter`: per-client rate limiter guard
+/// - `queue_tx`: channel to report broadcast queue size
+/// - `config`: server configuration (including logger settings)
+/// - `logger`: global logger instance
 async fn process_client_line(
     line: String,
     sender: &Client,
@@ -647,7 +647,7 @@ async fn process_client_line(
     // 1) Rate limit: reset & check in one call
     let within_limit = rate_limiter.lock().await.check_limit();
     if !within_limit {
-        // Notify the client they’re sending too fast, then skip broadcasting
+        // Notify the client they're sending too fast, then skip broadcasting
         let mut w = sender.writer.lock().await;
         let _ = w
             .write_all(b"Warning: You are sending messages too quickly. Please slow down.\n")
@@ -655,33 +655,51 @@ async fn process_client_line(
         return;
     }
 
-    // 2) Prepare the payload once
-    let clean = remove_last_newline(&line);
-    let payload_value = json!({
-        "addr":    sender.addr,
-        "content": clean,
+    // 2) Build the envelope (full fidelity)
+    let content = remove_last_newline(&line);
+    let envelope = json!({
+        "remote_addr": sender.addr,
+        "content": content,
     });
-    let payload_text = payload_value.to_string();
+    let envelope_text = envelope.to_string();
 
-    // 3) Log—JSON-mode or plain-text fallback
-    if config.logger.enable_json_log {
-        // JSON path: init_logger will parse & filter by log_keys
-        logger.info(&payload_text);
+    // 3) Parse the client's content *once*
+    let json_content: JsonValue = serde_json::from_str(&content).unwrap_or(JsonValue::String(content.to_string()));
+
+    // 4) Move it into pruning or keep it as-is
+    let pruned_content = if config.logger.log_keys.is_some() {
+        // Takes ownership—no clone!
+        prune_content_value(json_content, &config.logger.log_keys)
     } else {
-        // Plain-text path
-        logger.info(&format!("📨 From {}: {}", sender.addr, clean));
-    }
+        json_content
+    };
 
-    // 4) Broadcast the same JSON payload to clients
-    broadcast_message(clients, sender, &payload_text, queue_tx, logger).await;
+    // 5) Render the log line
+    let log_body = if config.logger.enable_json_log {
+        // JSON mode: re-envelope & serialize
+        json!({
+            "remote_addr": sender.addr,
+            "content": pruned_content,
+        })
+        .to_string()
+    } else {
+        // Plain mode: arrow + the pruned JSON
+        format!("📨 From {}: {}", sender.addr, pruned_content)
+    };
+
+    // 6) Emit one log call
+    logger.info(&log_body);
+
+    // 7) Send the un-filtered payload on to clients
+    broadcast_message(clients, sender, &envelope_text, queue_tx, logger).await;
 }
 
 /// Removes the last `\n` from the string if present.
 /// Returns a slice into `s` without allocating.
 ///
 /// # Why
-/// - We don’t want double newlines when logging or embedding content.
-/// - Using `strip_suffix` avoids allocations when there’s nothing to trim.
+/// - We don't want double newlines when logging or embedding content.
+/// - Using `strip_suffix` avoids allocations when there's nothing to trim.
 fn remove_last_newline(s: &str) -> &str {
     s.strip_suffix('\n').unwrap_or(s)
 }
@@ -705,7 +723,7 @@ async fn broadcast_message(
             .collect()                         // Collect into a Vec for iteration
     };
 
-    // 2) Report how many clients we’re about to send to.
+    // 2) Report how many clients we're about to send to.
     //    Using try_send ensures we never block; if the channel is full, we drop the report.
     let _ = queue_tx.try_send(snapshot.len());
 
@@ -714,7 +732,7 @@ async fn broadcast_message(
     let msg_bytes = Arc::new(Bytes::from(ensure_trailing_newline(msg).into_owned()));
 
     // 4) For each client in our snapshot, spawn a small task to write asynchronously.
-    //    This way, a slow or stalled client can’t hold up the others.
+    //    This way, a slow or stalled client can't hold up the others.
     for client in snapshot {
         let writer = client.writer.clone();  // Clone Arc<Mutex<...>> handle
         let buf = msg_bytes.clone();         // Clone Arc<Bytes> pointer
@@ -722,10 +740,10 @@ async fn broadcast_message(
         let log = logger.clone();            // Clone logger handle
 
         tokio::spawn(async move {
-            // Lock this client’s writer just long enough to send the bytes
+            // Lock this client's writer just long enough to send the bytes
             let mut w = writer.lock().await;
             if let Err(e) = w.write_all(&buf).await {
-                // Warn if we can’t send (client may have disconnected)
+                // Warn if we can't send (client may have disconnected)
                 log.warn(&format!("❌ Failed to send to client {}: {}", addr, e));
             }
         });

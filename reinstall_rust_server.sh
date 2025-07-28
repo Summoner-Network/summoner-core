@@ -44,7 +44,7 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
   . "$VENV_DIR/bin/activate"
 else
   echo "❌ Virtualenv not found at: $VENV_DIR"
-  exit 1
+  # exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ echo "🔧 Maturin:  $(which maturin || echo 'not found')"
 RUST_DIR="$THIS_SCRIPT/summoner/rust"
 if [ ! -d "$RUST_DIR" ]; then
   echo "❌ Expected Rust SDK path not found: $RUST_DIR"
-  exit 1
+  # exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ echo "🔍 Searching for Rust crates in: $RUST_DIR (prefix='$PREFIX_FILTER')"
 for DIR in "$RUST_DIR"/*/; do
   BASENAME="$(basename "$DIR")"
 
-  # skip if it doesn’t match the optional prefix
+  # skip if it doesn't match the optional prefix
   if [[ -n "$PREFIX_FILTER" && "$BASENAME" != "$PREFIX_FILTER"* ]]; then
     echo "🚫 Skipping $BASENAME"
     continue

@@ -12,7 +12,6 @@ from typing import (
 import asyncio
 import signal
 import inspect
-from json import JSONDecodeError
 from collections import defaultdict
 import platform
 
@@ -21,12 +20,13 @@ if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
 from summoner.utils import (
-    remove_last_newline,
-    ensure_trailing_newline,
-    fully_recover_json,
     load_config,
     )
-from summoner.logger import get_logger, configure_logger, Logger
+from summoner.logger import (
+    get_logger, 
+    configure_logger, 
+    Logger,
+    )
 from summoner.protocol.triggers import (
     Signal, 
     Event, 
@@ -42,7 +42,14 @@ from summoner.protocol.process import (
     ClientIntent,
     )
 from summoner.protocol.flow import Flow
-from summoner.protocol.validation import hook_priority_order, _check_param_and_return
+from summoner.protocol.validation import (
+    hook_priority_order, 
+    _check_param_and_return,
+)
+from summoner.protocol.payload import (
+    wrap_with_types, 
+    recover_with_types,
+)
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
@@ -660,11 +667,12 @@ class SummonerClient:
                     # if not data:
                     #     raise ServerDisconnected("Server closed the connection.")
 
-                    text = data.decode()
-                    try:
-                        payload = fully_recover_json(text)
-                    except (ValueError, JSONDecodeError):
-                        payload = remove_last_newline(text)
+                    # text = data.decode()
+                    # try:
+                    #     payload = fully_recover_json(text)
+                    # except (ValueError, JSONDecodeError):
+                    #     payload = remove_last_newline(text)
+                    payload = recover_with_types(data.decode())
 
                     # ----[ Build: Validation ]----
                     async with self.hooks_lock:
@@ -833,15 +841,18 @@ class SummonerClient:
                         continue
 
                     # NOTE: If "\n" is present, the payload is assumed to be structured
-                    message = (
-                        json.dumps(payload)
-                        if (not isinstance(payload, str) or "\n" in payload)
-                        else payload
-                    )
+                    # message = (
+                    #     json.dumps(payload)
+                    #     if (not isinstance(payload, str) or "\n" in payload)
+                    #     else payload
+                    # )
+                    # message = ensure_trailing_newline(message).encode()
+
+                    message = wrap_with_types(payload, version=self.core_version).encode()
 
                     # ----[ Unpack: Post Messages ]----
                     async with self.writer_lock:
-                        writer.write(ensure_trailing_newline(message).encode())
+                        writer.write(message)
                 
                 # No concurrency on batch_drain (initialized in run())
                 if not self.batch_drain:

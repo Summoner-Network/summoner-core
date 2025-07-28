@@ -10,7 +10,7 @@ use pyo3::{prelude::*, types::{PyModule, PyDict}, Bound};
 pub mod logger;
 mod server;
 
-// Pull in the specific items we need so we don’t have to write full paths later.
+// Pull in the specific items we need so we don't have to write full paths later.
 use logger::get_logger;
 use server::run_server;
 use server::config::ServerConfig;
@@ -20,7 +20,7 @@ use server::config::ServerConfig;
 /// 1. Read the Python config into Rust types.
 /// 2. Build a Tokio runtime (async engine).
 /// 3. Set up logging.
-/// 4. Launch the async server without blocking Python’s threads.
+/// 4. Launch the async server without blocking Python's threads.
 ///
 /// Parameters:
 /// - `_py`: a handle to the Python interpreter (needed for GIL management).
@@ -52,7 +52,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
     // Create or retrieve a logger instance with the given name.
     let logger = get_logger(&name);
 
-    // Run the server inside the Tokio runtime without holding Python’s Global Interpreter Lock.
+    // Run the server inside the Tokio runtime without holding Python's Global Interpreter Lock.
     // This lets Python handle other things (like signals) while our Rust code runs.
     let server_result = _py.allow_threads(|| {
         rt.block_on(async {
@@ -75,7 +75,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
         )
     })?;
 
-    // Everything went smoothly. Tell Python we’re done.
+    // Everything went smoothly. Tell Python we're done.
     Ok(())
 }
 
@@ -83,7 +83,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
 /// Inside, register the `start_tokio_server` function so Python can import it.
 #[pymodule]
 fn rust_server_sdk_2(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Make our Rust function available in the module’s namespace.
+    // Make our Rust function available in the module's namespace.
     m.add_function(wrap_pyfunction!(start_tokio_server, m)?)?;
 
     // Module setup succeeded.

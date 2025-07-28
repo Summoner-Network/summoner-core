@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+# set -euo pipefail
+set -uo pipefail
 
 # Check if sourced or executed
 (return 0 2>/dev/null) && SOURCED=1 || SOURCED=0
