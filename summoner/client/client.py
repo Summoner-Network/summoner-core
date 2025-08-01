@@ -111,8 +111,8 @@ class SummonerClient:
         self._flow = Flow()
 
         # Functions to read and write the flow's active states in memory
-        self._upload_states: Optional[Callable[[], Awaitable]] = None
-        self._download_states: Optional[Callable[[StateTape], Awaitable[Optional[bool]]]] = None
+        self._upload_states: Optional[Callable[[Any], Awaitable]] = None
+        self._download_states: Optional[Callable[[Any], Awaitable]] = None
 
         self.event_bridge_maxsize = None
         self.max_concurrent_workers = None # Limit the sending rate (will use 50 if None is given)
@@ -220,7 +220,7 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@upload_states",
-                allow_param=(type(None), str, dict),   # the payload
+                allow_param=(type(None), str, dict, Any),   # the payload
                 allow_return=(type(None), str, 
                                 list, list[str], 
                                 dict, dict[str, str], dict[str, list[str]],
@@ -245,7 +245,7 @@ class SummonerClient:
         Decorator to supply a function that receives a StateTape.
         Must be used before client.run().
         """
-        def decorator(fn: Callable[[StateTape], Awaitable[Optional[bool]]]):
+        def decorator(fn: Callable[[Any], Awaitable]):
             
             # ----[ Safety Checks ]----
 
@@ -255,11 +255,11 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@download_states",
-                allow_param=(type(None), str, 
-                                list, list[str], 
-                                dict, dict[str, str], dict[str, list[str]],
-                                dict[str, Union[str, list[str]]]),
-                allow_return=(type(None), bool),
+                allow_param=(type(None), Node, Any,
+                                list, list[Node], 
+                                dict, dict[str, Node], dict[Node, list[Node]],
+                                dict[str, Union[Node, list[Node]]]),
+                allow_return=(type(None), bool, Any),
                 logger=self.logger,
             )
 
