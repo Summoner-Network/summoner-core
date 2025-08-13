@@ -310,15 +310,17 @@ class Sender:
     triggers: Optional[set[Signal]]
 
     def responds_to(self, event: Any) -> bool:
+        action_check = True
         if self.actions is not None:
             if not any(isinstance(event, action) for action in self.actions):
-                return False
+                action_check = False
             
+        trigger_check = True
         if self.triggers is not None:
             if not any(extract_signal(event) == trig for trig in self.triggers):
-                return False
+                trigger_check = False
             
-        return True
+        return action_check and trigger_check
 
 @dataclass(frozen=True)
 class Receiver:
