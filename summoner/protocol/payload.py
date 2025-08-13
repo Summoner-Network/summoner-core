@@ -228,7 +228,6 @@ def recover_with_types(text: str) -> Union[str, Dict[str, Any]]:
     if not (isinstance(obj, dict) and "remote_addr" in obj and "content" in obj):
         # Malformed protocol message; upstream code can catch this if needed
         # raise ValueError("Unsupported message format from server.")
-        print("HERE:", obj)
         return obj
 
     addr    = obj["remote_addr"]
