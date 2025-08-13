@@ -257,8 +257,8 @@ class SummonerClient:
                 decorator_name="@download_states",
                 allow_param=(type(None), Node, Any,
                                 list, list[Node], 
-                                dict, dict[str, Node], dict[Node, list[Node]],
-                                dict[str, Union[Node, list[Node]]]),
+                                dict, dict[str, Node], dict[str, list[Node]], dict[str, Union[Node, list[Node]]], 
+                                dict[Optional[str], Node], dict[Optional[str], list[Node]],dict[Optional[str], Union[Node, list[Node]]]),
                 allow_return=(type(None), bool, Any),
                 logger=self.logger,
             )
