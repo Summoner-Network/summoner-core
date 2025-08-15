@@ -1182,7 +1182,7 @@ class SummonerClient:
             self, 
             host: str = '127.0.0.1', 
             port: int = 8888, 
-            config_path = ""
+            config_path: Optional[str] = None
         ):
         try:
             # Load config parameters
