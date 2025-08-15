@@ -3,7 +3,7 @@ import signal
 import os
 import sys
 import json
-from typing import Optional
+from typing import Optional, Any
 import platform
 import importlib
 
@@ -140,13 +140,23 @@ class SummonerServer:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    def run(self, host='127.0.0.1', port=8888, config_path = ""):
-        server_config = load_config(config_path=config_path, debug=True)
-
-        logger_cfg = server_config.get("logger", {})
-        configure_logger(self.logger, logger_cfg)
-        
+    def run(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8888,
+        config_path: Optional[str] = None,
+        config_dict: Optional[dict[str, Any]] = None,
+    ):
         if platform.system() != "Windows":
+            
+            if config_dict is None:
+                server_config = load_config(config_path=config_path, debug=True)
+            elif isinstance(config_dict, dict):
+                # Shallow copy to avoid external mutation
+                server_config = dict(config_dict)  
+            else:
+                raise TypeError(f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
+        
             rust_dispatch = {
                 
                 "rss_2": lambda h, p : rss_2.start_tokio_server(
