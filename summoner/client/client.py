@@ -886,6 +886,7 @@ class SummonerClient:
             writer: asyncio.StreamWriter, 
             stop_event: asyncio.Event
         ):
+        cancelled = False
         try:
 
             # ----[ Keep Sending While Actively Listening (No Travel) ]----
@@ -959,17 +960,28 @@ class SummonerClient:
 
         except asyncio.CancelledError:
             self.logger.info("Client about to disconnect...")
+            cancelled = True
+            # do NOT re-raise yet; let finally run first
 
-       
         finally:
-            # This may result in redundant cancellation if shutdown() is also called,
-            # but guarantees all workers get signaled even in abrupt exits.
-            for _ in range(self.max_concurrent_workers):
-                try:
-                    await self.send_queue.put(None)
-                except RuntimeError:
-                    # loop already closed, nothing to do
-                    break
+            # Best-effort signal to workers; never block on shutdown
+            if self.send_queue is not None:
+                # This may result in redundant cancellation if shutdown() is also called,
+                # but guarantees all workers get signaled even in abrupt exits.
+                for _ in range(self.max_concurrent_workers):
+                    try:
+                        if cancelled:
+                            self.send_queue.put_nowait(None)
+                        else:
+                            await self.send_queue.put(None)
+                    except (asyncio.QueueFull, RuntimeError):
+                        break
+                    except asyncio.CancelledError:
+                        # swallow during shutdown
+                        break
+            # if we want to propagate cancellation after cleanup:
+            if cancelled:
+                raise
 
     # ==== HANDLE BOTH SENDING AND RECEIVING ENDS ====
 
@@ -1224,12 +1236,18 @@ class SummonerClient:
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
         finally:
-            self.loop.run_until_complete(self._wait_for_tasks_to_finish())
-            
-            # The following gather is redundant if all workers are properly awaited above.
-            # Left here as an extra safety net in case new worker tasks are added elsewhere.
-            if self.worker_tasks:
-                self.loop.run_until_complete(asyncio.gather(*self.worker_tasks, return_exceptions=True))
+            try:
+                self.loop.run_until_complete(self._wait_for_tasks_to_finish())
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                pass
+
+            try:
+                # The following gather is redundant if all workers are properly awaited above.
+                # Left here as an extra safety net in case new worker tasks are added elsewhere.
+                if self.worker_tasks:
+                    self.loop.run_until_complete(asyncio.gather(*self.worker_tasks, return_exceptions=True))
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                pass
             
             self.loop.close()
             self.logger.info("Client exited cleanly.")
