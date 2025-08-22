@@ -992,6 +992,9 @@ class SummonerClient:
             # travel is only honored if set after this point, quit likewise
             await self._reset_client_intent()
 
+            listen_task = None
+            sender_task = None
+            task = None
             try:
                 # Register this session's task so it can be cancelled during shutdown
                 task = asyncio.current_task()
@@ -1017,6 +1020,8 @@ class SummonerClient:
                 # Once one completes, the other is cancelled and the connection is closed.
                 listen_task = asyncio.create_task(self.message_receiver_loop(reader, stop_event))
                 sender_task = asyncio.create_task(self.message_sender_loop(writer, stop_event))
+                async with self.tasks_lock:
+                    self.active_tasks.update({listen_task, sender_task})
 
                 # Wait until either the listener or sender finishes — the first to complete wins
                 done, pending = await asyncio.wait(
@@ -1025,13 +1030,13 @@ class SummonerClient:
                 )
 
                 # Cancel the task that did not complete
-                for task in pending:
-                    task.cancel()
+                for t in pending:
+                    t.cancel()
 
                 # Await the completed task (to raise any exceptions or finalize resources)
-                for task in done:
+                for t in done:
                     try:
-                        await task
+                        await t
                     except ServerDisconnected as e:
                         # Propagate server-side disconnection to the reconnection handler
                         raise ServerDisconnected(e)
@@ -1048,12 +1053,27 @@ class SummonerClient:
             
             finally:
                 
+                # Ensure both child tasks are cancelled & awaited even if we were cancelled mid-wait
+                for t in (listen_task, sender_task):
+                    if t is not None and not t.done():
+                        t.cancel()
+                for t in (listen_task, sender_task):
+                    if t is not None:
+                        try:
+                            await t
+                        except Exception:
+                            pass
+                
                 # Clean up worker used in the sender loop
                 await self._cleanup_workers()
 
-                # Deregister this session task from active list
+                # Deregister this session and its children from active tasks
                 async with self.tasks_lock:
-                    self.active_tasks.discard(task)
+                    if task is not None:
+                        self.active_tasks.discard(task)
+                    for t in (listen_task, sender_task):
+                        if t is not None:
+                            self.active_tasks.discard(t)
 
             # Check whether we should quit or loop back to travel to the next server (agent migration)
             async with self.connection_lock:
