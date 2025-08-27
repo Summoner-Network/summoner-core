@@ -6,16 +6,9 @@ experiments/
 *.mov
 *.db
 *.old
-*.sh.old
-*.py.old
-*.md.old
 logs/
-docs.old/
 img/assets/
-# Remy: remove at some point
-summoner_mock.py
-# Remy: next update
-summoner/aurora/
+simulations/summoner_mock.py
 test_logs.py
 
 # Byte-compiled / optimized / DLL files
