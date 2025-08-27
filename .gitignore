@@ -15,7 +15,7 @@ img/assets/
 # Remy: remove at some point
 summoner_mock.py
 # Remy: next update
-summoner/kobold/
+summoner/aurora/
 test_logs.py
 
 # Byte-compiled / optimized / DLL files

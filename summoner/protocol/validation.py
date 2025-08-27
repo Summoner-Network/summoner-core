@@ -17,7 +17,7 @@ from summoner.logger import Logger
 def hook_priority_order(priority: tuple) -> tuple:
     
     if priority != () and isinstance(priority[0], str):
-        # SDK priority: sort first, e.g., ('kobold', 0) → (0, 'kobold', 0)
+        # SDK priority: sort first, e.g., ('aurora', 0) → (0, 'aurora', 0)
         return (0, priority)
     else:
         # User priority: sort after SDK, e.g., (0, 1) → (1, 0, 1)
