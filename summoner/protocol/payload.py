@@ -153,6 +153,7 @@ def cast_v0_0_1(val: Any, expected: Any) -> Any:
 
 # Register version 0.0.1
 register_envelope_version("0.0.1", parse_v0_0_1, cast_v0_0_1)
+register_envelope_version("1.0.0", parse_v0_0_1, cast_v0_0_1)
 
 
 def wrap_with_types(
