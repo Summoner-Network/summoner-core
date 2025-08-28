@@ -68,7 +68,7 @@ class SummonerClient:
     DEFAULT_EVENT_BRIDGE_SIZE = 1000
     DEFAULT_MAX_CONSECUTIVE_ERRORS = 3          # Failed attempts to send before disconnecting
 
-    core_version = "0.0.1"
+    core_version = "0.1.0"
 
     def __init__(self, name: Optional[str] = None):
         
