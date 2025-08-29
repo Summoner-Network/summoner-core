@@ -1247,7 +1247,7 @@ class SummonerClient:
                     # (See ApiClient modification below)
                     creds = {"username": self._api_username, "password": self._api_password}
                     await self.api.login(creds)
-                    self.logger.info(f"API client successfully authenticated as '{self.api.username}' (ID: {self.api.userId})")
+                    self.logger.info(f"API client successfully authenticated as '{self.api.username}' (ID: {self.api.user_id})")
 
                 self.loop.run_until_complete(login_and_verify())
             else:

@@ -42,5 +42,13 @@
         "default_retry_limit": 3
         }
 
+    },
+
+    "api": {
+
+        "base_url": "https://summoner.org",
+        "username": "your-agent-username",
+        "password": "your-strong-password"
+
     }
 }
