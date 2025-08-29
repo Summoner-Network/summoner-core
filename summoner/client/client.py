@@ -2,6 +2,7 @@ import os
 import sys
 import json
 from typing import (
+    Dict,
     Optional, 
     Callable, 
     Union, 
@@ -14,6 +15,7 @@ import signal
 import inspect
 from collections import defaultdict
 import platform
+import httpx
 
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
@@ -141,6 +143,14 @@ class SummonerClient:
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
 
+        # [NEW] Attribute to hold the authenticated REST API client
+        self.api: Optional[SummonerAPIClient] = None
+
+        # [NEW] Attributes to hold API credentials from config
+        self._api_base_url: Optional[str] = None
+        self._api_username: Optional[str] = None
+        self._api_password: Optional[str] = None
+
     # ==== VERSION SPECIFIC ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
@@ -182,6 +192,12 @@ class SummonerClient:
         
         if self.send_queue_maxsize < self.max_concurrent_workers:
             self.logger.warning(f"queue_maxsize < concurrency_limit; back-pressure will throttle producers at {self.send_queue_maxsize}")
+        
+        # [NEW] Section to extract API client configuration
+        api_cfg = config.get("api", {})
+        self._api_base_url = api_cfg.get("base_url")
+        self._api_username = api_cfg.get("username")
+        self._api_password = api_cfg.get("password")
 
     def initialize(self):
         self._flow.ready()
@@ -1216,6 +1232,27 @@ class SummonerClient:
             # Block until every @receive / @send decorator has registered
             self.loop.run_until_complete(self._wait_for_registration())
 
+            # [NEW] The API Client Handshake
+            # Before starting the main loop, we initialize and authenticate the
+            # REST API client if credentials are provided.
+            if self._api_base_url and self._api_username and self._api_password:
+                self.logger.info("API client credentials found, initializing...")
+                self.api = SummonerAPIClient(base_url=self._api_base_url)
+
+                async def login_and_verify():
+                    # The test client's registerAndLogin creates a new user every time.
+                    # We'll adapt it to log in with provided credentials.
+                    # For this example, we assume a login method exists or is added.
+                    # Let's add a simple login method to ApiClient for this.
+                    # (See ApiClient modification below)
+                    creds = {"username": self._api_username, "password": self._api_password}
+                    await self.api.login(creds)
+                    self.logger.info(f"API client successfully authenticated as '{self.api.username}' (ID: {self.api.userId})")
+
+                self.loop.run_until_complete(login_and_verify())
+            else:
+                self.logger.warning("No API credentials provided in config. `client.api` will be unavailable.")
+
             # Start the client logic
             self.loop.run_until_complete(self.run_client(host=host, port=port))
 
@@ -1237,3 +1274,140 @@ class SummonerClient:
             
             self.loop.close()
             self.logger.info("Client exited cleanly.")
+
+# Define a custom exception for clarity
+class APIError(Exception):
+    def __init__(self, message, status_code: int, response_text: str):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
+
+class SummonerAPIClient:
+    """
+    A high-level async client for interacting with the Summoner REST API.
+
+    This client handles authentication (login-or-register), session management
+    (JWT token), and provides methods for all core API endpoints, including
+    BOSS (Objects/Associations) and Fathom (Chains).
+    """
+
+    def __init__(self, base_url: str):
+        if not base_url:
+            raise ValueError("base_url is required")
+        self.base_url = base_url
+        self._client = httpx.AsyncClient(base_url=self.base_url)
+
+        # Authentication state
+        self.token: Optional[str] = None
+        self.user_id: Optional[str] = None
+        self.username: Optional[str] = None
+
+    async def close(self):
+        """Closes the underlying HTTP client session."""
+        await self._client.aclose()
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        expected_status: int,
+        json_body: Optional[Dict] = None,
+    ) -> Any:
+        """A private helper for making authenticated JSON requests."""
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        try:
+            response = await self._client.request(
+                method,
+                path,
+                headers=headers,
+                json=json_body if json_body is not None else None,
+                timeout=10.0,
+            )
+
+            if response.status_code != expected_status:
+                # Provide a special exception for the login-or-register flow
+                if path == "/api/auth/login" and response.status_code == 401:
+                    raise APIError("Invalid credentials", 401, await response.text())
+
+                raise APIError(
+                    f"API Error: Expected status {expected_status} but got {response.status_code}",
+                    response.status_code,
+                    await response.text(),
+                )
+
+            if response.status_code == 204: # No Content
+                return None
+
+            return response.json()
+
+        except httpx.RequestError as e:
+            raise APIError(f"HTTP request failed: {e}", 0, "") from e
+
+
+    async def login(self, creds: Dict[str, str]):
+        """
+        Authenticates the client. Attempts to log in, and if the user does
+        not exist (401), it will attempt to register them and log in again.
+        """
+        username = creds.get("username")
+        password = creds.get("password")
+        if not username or not password:
+            raise ValueError("Username and password are required")
+
+        try:
+            # First, try to log in directly.
+            login_res = await self._request("POST", "/api/auth/login", 200, creds)
+        except APIError as e:
+            # If login fails with 401, user might not exist. Try to register.
+            if e.status_code == 401:
+                try:
+                    await self._request("POST", "/api/auth/register", 201, creds)
+                    # If registration succeeds, we must log in again to get a token.
+                    login_res = await self._request("POST", "/api/auth/login", 200, creds)
+                except APIError as reg_err:
+                    raise APIError(
+                        f"Login failed, and registration also failed with status {reg_err.status_code}",
+                        reg_err.status_code,
+                        reg_err.response_text
+                    ) from reg_err
+            else:
+                # Re-raise other API errors (e.g., 500)
+                raise e
+
+        # On successful login, store the token and fetch user details
+        self.token = login_res.get("jwt")
+        if not self.token:
+            raise APIError("Login succeeded but did not return a JWT token", 200, json.dumps(login_res))
+
+        me_res = await self._request("GET", "/api/account/me", 200)
+        account_data = me_res.get("account", {})
+        self.user_id = account_data.get("id")
+        self.username = account_data.get("attrs", {}).get("username")
+
+        if not self.user_id or not self.username:
+            raise APIError("Successfully authenticated but failed to retrieve user details from /me", 200, json.dumps(me_res))
+
+    # --- BOSS (Objects & Associations) API ---
+
+    def _check_auth(self, method_name: str):
+        """Internal helper to ensure client is authenticated before making a call."""
+        if not self.token or not self.user_id:
+            raise RuntimeError(
+                f"Must be logged in to call {method_name}. Please call login() first."
+            )
+
+    async def get_object(self, otype: int, obj_id: Union[str, int]) -> Dict:
+        self._check_auth("get_object")
+        path = f"/api/objects/{self.user_id}/{otype}/{obj_id}"
+        return await self._request("GET", path, 200)
+
+    async def put_object(self, obj: Dict) -> Dict:
+        self._check_auth("put_object")
+        path = f"/api/objects/{self.user_id}"
+        return await self._request("PUT", path, 201, json_body=obj)
