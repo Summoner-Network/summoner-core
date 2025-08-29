@@ -21,6 +21,7 @@ Understanding this separation is central to mastering the platform.
 ### 1. BOSS (Basic Object Storage Substrate)
 
 **Purpose**: Models the current state of the world.
+
 **Design**: Expressive, graph-based, durable, and predictable.
 
 Core concepts:
@@ -41,6 +42,7 @@ Superpower:
 ### 2. Fathom (The Immutable Ledger)
 
 **Purpose**: Records history with perfect integrity.
+
 **Design**: High-throughput, append-only, reliable.
 
 Properties:
