@@ -24,16 +24,16 @@ Understanding this separation is central to mastering the platform.
 
 **Design**: Expressive, graph-based, durable, and predictable.
 
-Core concepts:
+**Core concepts:**
 
 * **Versioned Objects**: Nouns of the system (e.g., AI Agent, User Account).
 * **Structural Associations**: Verbs connecting objects (e.g., `monitors_model`).
 
-Key property:
+**Key property:**
 
 * **Automatic optimistic locking** ensures data integrity in high-concurrency environments.
 
-Superpower:
+**Superpower:**
 
 * **Modeling Without Migrations**: Introduce new concepts or relationships by creating new objects and associations. Most data modeling changes require no schema migrations or new endpoints. This enables rapid modeling at the speed of thought.
 
@@ -45,10 +45,14 @@ Superpower:
 
 **Design**: High-throughput, append-only, reliable.
 
-Properties:
+**Properties:**
 
 * **Shock Absorber**: Internal batching system smooths chaotic, concurrent writes into efficient, predictable transactions.
 * **Perfect Audit Trail**: Immutable by design, enabling trustworthy audit logs for guardrails, agent decisions, or model compositions.
+
+**Superpower:**
+
+* **Prepend Channels for Advanced Use-Cases**: While Fathom is append-only by default, advanced flows can employ controlled **prepend channels**. These do not rewrite history but layer metadata or annotations before a recorded event for indexing, correlation, or zero-latency replay pipelines. This allows specialized consumers to interpret sequences with richer context while preserving the canonical immutable ledger.
 
 ---
 
@@ -71,4 +75,4 @@ Identity is the first application built on the substrate, proving its flexibilit
 
 ## Conclusion
 
-The Summoner substrate provides two unified layers—BOSS for state, Fathom for history—that together deliver a transparent, expressive, and auditable foundation for AI systems. By internalizing these principles, developers can build robust, scalable, and verifiable architectures.
+The Summoner substrate provides two unified layers—BOSS for state, Fathom for history—that together deliver a transparent, expressive, and auditable foundation for AI systems. With Fathom’s prepend channels and BOSS’s modeling flexibility, developers gain the power to construct robust, scalable, and verifiable architectures suited to both everyday operations and advanced analytical pipelines.
