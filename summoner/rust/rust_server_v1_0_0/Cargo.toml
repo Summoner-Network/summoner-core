@@ -1,10 +1,10 @@
 [package]
-name = "rust_server_sdk_2"
+name = "rust_server_v1_0_0"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "rust_server_sdk_2"          # ✅ This becomes `import rust_server_sdk_2` in Python
+name = "rust_server_v1_0_0"          # ✅ This becomes `import rust_server_v1_0_0` in Python
 crate-type = ["cdylib"]             # ✅ Required for Python FFI compatibility via PyO3
 
 

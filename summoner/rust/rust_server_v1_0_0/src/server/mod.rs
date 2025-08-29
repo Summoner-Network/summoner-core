@@ -756,7 +756,7 @@ async fn broadcast_message(
 /// # Why
 /// - When we broadcast messages, downstream writers expect each payload to end in `\n`.
 /// - `Cow` lets us borrow `s` unchanged if it already ends with `\n`, saving allocations.
-fn ensure_trailing_newline(s: &str) -> Cow<str> {
+fn ensure_trailing_newline(s: &str) -> Cow<'_, str> {
     if s.ends_with('\n') {
         // Already has a newline: borrow the original string
         Cow::Borrowed(s)
