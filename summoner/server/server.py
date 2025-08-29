@@ -19,6 +19,7 @@ from summoner.utils import (
     load_config,
     )
 from summoner.logger import get_logger, configure_logger, Logger
+from summoner.utils import format_addr
 # import rust_server_sdk_2 as rss_2
 # import rust_server_sdk_3 as rss_3
 if platform.system() != "Windows":
@@ -62,7 +63,7 @@ class SummonerServer:
         reader: asyncio.streams.StreamReader, 
         writer: asyncio.streams.StreamWriter
         ):
-        addr = writer.get_extra_info("peername")
+        addr = format_addr(writer.get_extra_info("peername"))
         self.logger.info(f"{addr} connected.")
 
         task = asyncio.current_task()
@@ -70,7 +71,7 @@ class SummonerServer:
             self.clients.add(writer)
 
         async with self.tasks_lock:
-            self.active_tasks[task] = str(addr)
+            self.active_tasks[task] = addr
 
         try:
             while True:
@@ -147,16 +148,17 @@ class SummonerServer:
         config_path: Optional[str] = None,
         config_dict: Optional[dict[str, Any]] = None,
     ):
+        
+        if config_dict is None:
+            server_config = load_config(config_path=config_path, debug=True)
+        elif isinstance(config_dict, dict):
+            # Shallow copy to avoid external mutation
+            server_config = dict(config_dict)  
+        else:
+            raise TypeError(f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
+
         if platform.system() != "Windows":
             
-            if config_dict is None:
-                server_config = load_config(config_path=config_path, debug=True)
-            elif isinstance(config_dict, dict):
-                # Shallow copy to avoid external mutation
-                server_config = dict(config_dict)  
-            else:
-                raise TypeError(f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
-        
             rust_dispatch = {
                 
                 "rss_2": lambda h, p : rss_2.start_tokio_server(
@@ -186,11 +188,17 @@ class SummonerServer:
                 return
         
         try:
+            logger_cfg = server_config.get("logger", {})
+            configure_logger(self.logger, logger_cfg)
+
             self.set_termination_signals()
             self.loop.run_until_complete(self.run_server(host=host, port=port))
+
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
+        
         finally:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
+
             self.loop.close()
             self.logger.info("Server exited cleanly.")
