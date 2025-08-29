@@ -3,7 +3,7 @@
     "host": "IP address or hostname to bind (e.g. '127.0.0.1')",
     "port": "TCP port number (e.g. 8888)",
 
-    "version": "The version of the server implementation (e.g. 'python', 'rust')",
+    "version": "The version of the server implementation (e.g. \"python\", \"rust\")",
     
     "logger": {
         "log_level": "Minimum log severity (DEBUG < INFO < WARNING < ERROR < CRITICAL)",
