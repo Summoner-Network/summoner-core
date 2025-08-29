@@ -431,7 +431,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust_server_sdk"
+name = "rust_server_v1_0_0"
 version = "0.1.0"
 dependencies = [
  "bytes",

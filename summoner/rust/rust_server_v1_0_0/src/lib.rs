@@ -82,10 +82,10 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
     Ok(())
 }
 
-/// Define a Python module named `rust_server_sdk`.
+/// Define a Python module named `rust_server_v1_0_0`.
 /// Inside, register the `start_tokio_server` function so Python can import it.
 #[pymodule]
-fn rust_server_sdk(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rust_server_v1_0_0(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make our Rust function available in the module's namespace.
     m.add_function(wrap_pyfunction!(start_tokio_server, m)?)?;
 
