@@ -6,3 +6,6 @@ from .json_handlers import (
     fully_recover_json,
     load_config,
     )
+from .addr_handlers import (
+    format_addr,
+    )
