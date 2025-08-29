@@ -1,10 +1,8 @@
-# Define a custom exception for clarity
-import json
-from typing import Any, Dict, Optional, Union
-
 import httpx
+import json
+from typing import Optional, Any, Dict, Union
 
-
+# Define a custom exception for clarity
 class APIError(Exception):
     def __init__(self, message, status_code: int, response_text: str):
         super().__init__(message)
@@ -21,6 +19,8 @@ class _BaseClient:
         self.token: Optional[str] = None
         self.user_id: Optional[str] = None
         self.username: Optional[str] = None
+        self.auth_method: Optional[str] = None
+        self._last_creds: Optional[Dict[str, str]] = None # Cache credentials for re-login
 
     async def _request(
         self,
@@ -28,9 +28,10 @@ class _BaseClient:
         path: str,
         expected_status: int,
         json_body: Optional[Dict] = None,
-        params: Optional[Dict] = None
+        params: Optional[Dict] = None,
+        _is_retry: bool = False # Internal flag to prevent infinite loops
     ) -> Any:
-        """A private helper for making authenticated JSON requests using httpx."""
+        """A private helper that now includes automatic re-authentication."""
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -40,67 +41,76 @@ class _BaseClient:
 
         try:
             response = await self._client.request(
-                method,
-                path,
-                headers=headers,
-                json=json_body if json_body is not None else None,
-                params=params if params is not None else None,
-                timeout=10.0,
+                method, path, headers=headers,
+                json=json_body, params=params, timeout=10.0
             )
 
             if response.status_code != expected_status:
+                # If we get a 401, and this isn't already a retry attempt...
+                if response.status_code == 401 and not _is_retry:
+                    if not self._last_creds:
+                        # Cannot re-authenticate if we don't have credentials
+                        raise APIError("Token expired and no credentials available for re-login.", 401, response.text)
+                    
+                    # Perform the re-login. The `login` method is on the main client.
+                    # Because of inheritance, `self` here refers to the SummonerAPIClient instance.
+                    await self.login(self._last_creds)
+                    
+                    # Retry the original request one time with the new token.
+                    return await self._request(method, path, expected_status, json_body, params, _is_retry=True)
+
                 if path == "/api/auth/login" and response.status_code == 401:
                     raise APIError("Invalid credentials", 401, response.text)
+                
                 raise APIError(
                     f"API Error: Expected status {expected_status} but got {response.status_code}",
-                    response.status_code,
-                    response.text,
+                    response.status_code, response.text
                 )
 
-            if response.status_code == 204: # No Content
-                return None
-
-            return response.json()
-
+            return None if response.status_code == 204 else response.json()
         except httpx.RequestError as e:
             raise APIError(f"HTTP request failed: {e}", 0, "") from e
 
     def _check_auth(self, method_name: str):
         if not self.token or not self.user_id or not self.username:
-            raise RuntimeError(
-                f"Must be logged in to call {method_name}. Please call login() first."
-            )
-            
-    async def close(self):
-        """Closes the underlying HTTP client session."""
-        await self._client.aclose()
+            raise RuntimeError(f"Must be logged in to call {method_name}. Please call login() first.")
 
-class SummonerSecurityAPIClient:
-    """Handles authentication endpoints."""
+    async def close(self):
+        await self._client.aclose()
+        
+    # This method will be implemented by the main client class, but is declared
+    # here for type hinting and conceptual clarity.
+    async def login(self, creds: Dict[str, str]):
+        raise NotImplementedError
+
+class SummonerAuthAPIClient:
+    """Handles authentication and Principal Secret (API Key) endpoints."""
     def __init__(self, parent_client: '_BaseClient'):
         self._client = parent_client
 
     async def login(self, creds: Dict[str, str]) -> None:
+        # Cache the credentials *before* attempting to log in.
+        self._client._last_creds = creds
+        
+        key = creds.get("key")
         username = creds.get("username")
         password = creds.get("password")
-        if not username or not password:
-            raise ValueError("Username and password are required")
 
-        try:
-            login_res = await self._client._request("POST", "/api/auth/login", 200, json_body=creds)
-        except APIError as e:
-            if e.status_code == 401:
-                try:
+        if key:
+            login_res = await self._client._request("POST", "/api/auth/login", 200, json_body={"key": key})
+            self._client.auth_method = 'key'
+        elif username and password:
+            try:
+                login_res = await self._client._request("POST", "/api/auth/login", 200, json_body=creds)
+            except APIError as e:
+                if e.status_code == 401:
                     await self._client._request("POST", "/api/auth/register", 201, json_body=creds)
                     login_res = await self._client._request("POST", "/api/auth/login", 200, json_body=creds)
-                except APIError as reg_err:
-                    raise APIError(
-                        f"Login failed, and registration also failed with status {reg_err.status_code}",
-                        reg_err.status_code,
-                        reg_err.response_text
-                    ) from reg_err
-            else:
-                raise e
+                else:
+                    raise e
+            self._client.auth_method = 'password'
+        else:
+            raise ValueError("Credentials must include either 'key' or both 'username' and 'password'")
 
         self._client.token = login_res.get("jwt")
         if not self._client.token:
@@ -112,9 +122,29 @@ class SummonerSecurityAPIClient:
         self._client.username = account_data.get("attrs", {}).get("username")
 
         if not self._client.user_id or not self._client.username:
-            raise APIError("Successfully authenticated but failed to retrieve user details from /me", 200, json.dumps(me_res))
+            raise APIError("Authenticated but failed to retrieve user details from /me", 200, json.dumps(me_res))
 
-class SummonerObjectsAPIClient:
+    async def associate_secret(self, secret: str) -> Dict:
+        self._client._check_auth("associate_secret")
+        if self._client.auth_method != 'password':
+            raise PermissionError("Cannot provision new secrets when authenticated with an API key.")
+        return await self._client._request("POST", "/api/agent/associate", 200, json_body={"secret": secret})
+
+    async def revoke_secret(self, secret: str) -> Dict:
+        self._client._check_auth("revoke_secret")
+        if self._client.auth_method != 'password':
+            raise PermissionError("Cannot revoke secrets when authenticated with an API key.")
+        return await self._client._request("POST", "/api/agent/revoke", 200, json_body={"secret": secret})
+
+    async def check_secret(self, account_id: Union[str, int], secret: str) -> Dict:
+        path = f"/api/agent/check?account={account_id}"
+        return await self._client._request("POST", path, 200, json_body={"secret": secret})
+
+    async def verify_key(self, key: str) -> Dict:
+        path = "/api/agent/verify_key"
+        return await self._client._request("POST", path, 200, json_body={"key": key})
+
+class SummonerBossAPIClient:
     """Handles BOSS (Objects & Associations) endpoints."""
     def __init__(self, parent_client: '_BaseClient'):
         self._client = parent_client
@@ -164,24 +194,16 @@ class SummonerChainsAPIClient:
         path = f"/api/chains/metadata/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
         return await self._client._request("GET", path, 200)
 
-    # ... Other chains methods like prepend, get_block, delete etc. would follow the same pattern ...
-
-
 class SummonerAPIClient(_BaseClient):
     """
-    A high-level async client for the Summoner REST API.
-    
-    This client composes specialized sub-clients for different API areas,
-    accessible via `.auth`, `.boss`, and `.chains` attributes.
+    The main high-level client, composing specialized sub-clients.
     """
     def __init__(self, base_url: str):
         if not base_url:
             raise ValueError("base_url is required")
-        
         super().__init__(base_url)
-        
-        self.security = SummonerSecurityAPIClient(self)
-        self.objects = SummonerObjectsAPIClient(self)
+        self.auth = SummonerAuthAPIClient(self)
+        self.boss = SummonerBossAPIClient(self)
         self.chains = SummonerChainsAPIClient(self)
 
     async def login(self, creds: Dict[str, str]):
@@ -189,8 +211,9 @@ class SummonerAPIClient(_BaseClient):
         Authenticates the client via the auth sub-client.
         This populates the session state for all other sub-clients.
         """
-        await self.security.login(creds)
+        await self.auth.login(creds)
     
     async def close(self):
         """Closes the underlying httpx client session."""
         await super().close()
+
