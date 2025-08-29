@@ -1284,17 +1284,16 @@ class APIError(Exception):
 
 class _BaseClient:
     """
-    An internal base class to handle shared state and the raw request logic.
+    An internal base class to handle shared state and the httpx request logic.
     Not intended for direct use.
     """
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
+    def __init__(self, base_url: str):
+        self._client = httpx.AsyncClient(base_url=base_url)
         self.token: Optional[str] = None
         self.user_id: Optional[str] = None
         self.username: Optional[str] = None
 
-    async def _raw_request(
+    async def _request(
         self,
         method: str,
         path: str,
@@ -1302,76 +1301,50 @@ class _BaseClient:
         json_body: Optional[Dict] = None,
         params: Optional[Dict] = None
     ) -> Any:
-        """A private helper for making raw HTTP requests with asyncio."""
-        reader, writer = await asyncio.open_connection(self.host, self.port)
-
-        query_string = ""
-        if params:
-            query_string = "?" + "&".join(f"{k}={v}" for k, v in params.items())
-        
-        full_path = path + query_string
-
-        body_str = json.dumps(json_body) if json_body else ""
-        content_length = len(body_str.encode('utf-8'))
-
-        request_lines = [
-            f"{method} {full_path} HTTP/1.1",
-            f"Host: {self.host}:{self.port}",
-            "Connection: close",
-            "Accept: application/json",
-        ]
+        """A private helper for making authenticated JSON requests using httpx."""
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
         if self.token:
-            request_lines.append(f"Authorization: Bearer {self.token}")
-        if json_body:
-            request_lines.append("Content-Type: application/json")
-            request_lines.append(f"Content-Length: {content_length}")
-
-        request = "\r\n".join(request_lines) + "\r\n\r\n" + body_str
+            headers["Authorization"] = f"Bearer {self.token}"
 
         try:
-            writer.write(request.encode('utf-8'))
-            await writer.drain()
+            response = await self._client.request(
+                method,
+                path,
+                headers=headers,
+                json=json_body if json_body is not None else None,
+                params=params if params is not None else None,
+                timeout=10.0,
+            )
 
-            status_line = await reader.readline()
-            if not status_line:
-                raise APIError("Server closed connection without a response.", 0, "")
-            
-            version, status_code_str, *reason = status_line.decode('utf-8').split()
-            status_code = int(status_code_str)
-
-            headers = {}
-            while True:
-                line = await reader.readline()
-                if line == b'\r\n':
-                    break
-                header_key, header_value = line.decode('utf-8').strip().split(': ', 1)
-                headers[header_key.lower()] = header_value
-
-            response_body_bytes = await reader.read()
-            response_text = response_body_bytes.decode('utf-8')
-
-            if status_code != expected_status:
-                if path == "/api/auth/login" and status_code == 401:
-                    raise APIError("Invalid credentials", 401, response_text)
+            if response.status_code != expected_status:
+                if path == "/api/auth/login" and response.status_code == 401:
+                    raise APIError("Invalid credentials", 401, response.text)
                 raise APIError(
-                    f"API Error: Expected status {expected_status} but got {status_code}",
-                    status_code,
-                    response_text,
+                    f"API Error: Expected status {expected_status} but got {response.status_code}",
+                    response.status_code,
+                    response.text,
                 )
 
-            if status_code == 204 or not response_text:
+            if response.status_code == 204: # No Content
                 return None
 
-            return json.loads(response_text)
-        finally:
-            writer.close()
-            await writer.wait_closed()
-            
+            return response.json()
+
+        except httpx.RequestError as e:
+            raise APIError(f"HTTP request failed: {e}", 0, "") from e
+
     def _check_auth(self, method_name: str):
         if not self.token or not self.user_id or not self.username:
             raise RuntimeError(
                 f"Must be logged in to call {method_name}. Please call login() first."
             )
+            
+    async def close(self):
+        """Closes the underlying HTTP client session."""
+        await self._client.aclose()
 
 class SummonerAuthAPIClient:
     """Handles authentication endpoints."""
@@ -1385,12 +1358,12 @@ class SummonerAuthAPIClient:
             raise ValueError("Username and password are required")
 
         try:
-            login_res = await self._client._raw_request("POST", "/api/auth/login", 200, creds)
+            login_res = await self._client._request("POST", "/api/auth/login", 200, json_body=creds)
         except APIError as e:
             if e.status_code == 401:
                 try:
-                    await self._client._raw_request("POST", "/api/auth/register", 201, creds)
-                    login_res = await self._client._raw_request("POST", "/api/auth/login", 200, creds)
+                    await self._client._request("POST", "/api/auth/register", 201, json_body=creds)
+                    login_res = await self._client._request("POST", "/api/auth/login", 200, json_body=creds)
                 except APIError as reg_err:
                     raise APIError(
                         f"Login failed, and registration also failed with status {reg_err.status_code}",
@@ -1404,7 +1377,7 @@ class SummonerAuthAPIClient:
         if not self._client.token:
             raise APIError("Login succeeded but did not return a JWT token", 200, json.dumps(login_res))
 
-        me_res = await self._client._raw_request("GET", "/api/account/me", 200)
+        me_res = await self._client._request("GET", "/api/account/me", 200)
         account_data = me_res.get("account", {})
         self._client.user_id = account_data.get("id")
         self._client.username = account_data.get("attrs", {}).get("username")
@@ -1420,32 +1393,32 @@ class SummonerBossAPIClient:
     async def get_object(self, otype: int, obj_id: Union[str, int]) -> Dict:
         self._client._check_auth("get_object")
         path = f"/api/objects/{self._client.user_id}/{otype}/{obj_id}"
-        return await self._client._raw_request("GET", path, 200)
+        return await self._client._request("GET", path, 200)
 
     async def put_object(self, obj: Dict) -> Dict:
         self._client._check_auth("put_object")
         path = f"/api/objects/{self._client.user_id}"
-        return await self._client._raw_request("PUT", path, 201, json_body=obj)
+        return await self._client._request("PUT", path, 201, json_body=obj)
         
     async def remove_object(self, otype: int, obj_id: Union[str, int]) -> Dict:
         self._client._check_auth("remove_object")
         path = f"/api/objects/{self._client.user_id}/{otype}/{obj_id}"
-        return await self._client._raw_request("DELETE", path, 200)
+        return await self._client._request("DELETE", path, 200)
 
     async def get_associations(self, type: str, source_id: Union[str, int], params: Optional[Dict] = None) -> Dict:
         self._client._check_auth("get_associations")
         path = f"/api/objects/{self._client.user_id}/associations/{type}/{source_id}"
-        return await self._client._raw_request("GET", path, 200, params=params)
+        return await self._client._request("GET", path, 200, params=params)
 
     async def put_association(self, association: Dict) -> Dict:
         self._client._check_auth("put_association")
         path = f"/api/objects/{self._client.user_id}/associations"
-        return await self._client._raw_request("PUT", path, 201, json_body=association)
+        return await self._client._request("PUT", path, 201, json_body=association)
 
     async def remove_association(self, type: str, source_id: Union[str, int], target_id: Union[str, int]) -> Dict:
         self._client._check_auth("remove_association")
         path = f"/api/objects/{self._client.user_id}/associations/{type}/{source_id}/{target_id}"
-        return await self._client._raw_request("DELETE", path, 200)
+        return await self._client._request("DELETE", path, 200)
 
 class SummonerChainsAPIClient:
     """Handles Fathom (Chains) endpoints."""
@@ -1455,12 +1428,12 @@ class SummonerChainsAPIClient:
     async def append(self, chain_key: Dict, data: Dict) -> Dict:
         self._client._check_auth("append")
         path = f"/api/chains/append/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
-        return await self._client._raw_request("POST", path, 201, json_body=data)
+        return await self._client._request("POST", path, 201, json_body=data)
         
     async def get_metadata(self, chain_key: Dict) -> Dict:
         self._client._check_auth("get_metadata")
         path = f"/api/chains/metadata/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
-        return await self._client._raw_request("GET", path, 200)
+        return await self._client._request("GET", path, 200)
 
     # ... Other chains methods like prepend, get_block, delete etc. would follow the same pattern ...
 
@@ -1476,14 +1449,10 @@ class SummonerAPIClient(_BaseClient):
         if not base_url:
             raise ValueError("base_url is required")
         
-        url_parts = base_url.replace("http://", "").replace("https://", "").split(":")
-        host = url_parts[0]
-        port = int(url_parts[1]) if len(url_parts) > 1 else 80
+        super().__init__(base_url)
         
-        super().__init__(host, port)
-        
-        self.security = SummonerAuthAPIClient(self)
-        self.objects = SummonerBossAPIClient(self)
+        self.auth = SummonerAuthAPIClient(self)
+        self.boss = SummonerBossAPIClient(self)
         self.chains = SummonerChainsAPIClient(self)
 
     async def login(self, creds: Dict[str, str]):
@@ -1491,8 +1460,8 @@ class SummonerAPIClient(_BaseClient):
         Authenticates the client via the auth sub-client.
         This populates the session state for all other sub-clients.
         """
-        await self.security.login(creds)
+        await self.auth.login(creds)
     
     async def close(self):
-        """Placeholder for future persistent connection management."""
-        pass
+        """Closes the underlying httpx client session."""
+        await super().close()
