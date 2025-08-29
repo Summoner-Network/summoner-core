@@ -1346,7 +1346,7 @@ class _BaseClient:
         """Closes the underlying HTTP client session."""
         await self._client.aclose()
 
-class SummonerAuthAPIClient:
+class SummonerSecurityAPIClient:
     """Handles authentication endpoints."""
     def __init__(self, parent_client: '_BaseClient'):
         self._client = parent_client
@@ -1385,7 +1385,7 @@ class SummonerAuthAPIClient:
         if not self._client.user_id or not self._client.username:
             raise APIError("Successfully authenticated but failed to retrieve user details from /me", 200, json.dumps(me_res))
 
-class SummonerBossAPIClient:
+class SummonerObjectsAPIClient:
     """Handles BOSS (Objects & Associations) endpoints."""
     def __init__(self, parent_client: '_BaseClient'):
         self._client = parent_client
@@ -1451,8 +1451,8 @@ class SummonerAPIClient(_BaseClient):
         
         super().__init__(base_url)
         
-        self.auth = SummonerAuthAPIClient(self)
-        self.boss = SummonerBossAPIClient(self)
+        self.security = SummonerSecurityAPIClient(self)
+        self.objects = SummonerObjectsAPIClient(self)
         self.chains = SummonerChainsAPIClient(self)
 
     async def login(self, creds: Dict[str, str]):
@@ -1460,7 +1460,7 @@ class SummonerAPIClient(_BaseClient):
         Authenticates the client via the auth sub-client.
         This populates the session state for all other sub-clients.
         """
-        await self.auth.login(creds)
+        await self.security.login(creds)
     
     async def close(self):
         """Closes the underlying httpx client session."""
