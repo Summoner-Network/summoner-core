@@ -2,7 +2,7 @@
     "host": "The IP address or hostname your server will bind to (e.g. \"127.0.0.1\" for localhost).",
     "port": "The TCP port number on which the server listens for incoming connections (e.g. 8888).",
     
-    "version": "The version of the server implementation (e.g. python, rss, rss_1, rss_2)",
+    "version": "The version of the server implementation (e.g. python, rust)",
     
     "logger": {
         "log_level": "Specifies the minimum level of messages to record (e.g. \"DEBUG\" < \"INFO\" < \"WARNING\" < \"ERROR\" < \"CRITICAL\").",

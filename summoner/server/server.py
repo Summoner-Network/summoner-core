@@ -20,11 +20,9 @@ from summoner.utils import (
     )
 from summoner.logger import get_logger, configure_logger, Logger
 from summoner.utils import format_addr
-# import rust_server_sdk_2 as rss_2
-# import rust_server_sdk_3 as rss_3
+# import rust_server_sdk as rss
 if platform.system() != "Windows":
-    rss_2 = importlib.import_module("rust_server_sdk_2")
-    rss_3 = importlib.import_module("rust_server_sdk_3")
+    rss = importlib.import_module("rust_server_sdk")
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -160,16 +158,8 @@ class SummonerServer:
         if platform.system() != "Windows":
             
             rust_dispatch = {
-                
-                "rss_2": lambda h, p : rss_2.start_tokio_server(
-                    self.name, 
-                    {
-                    "host": server_config.get("host") or h, 
-                    "port": server_config.get("port") or p, 
-                    **server_config.get("hyper_parameters", {})
-                    }),
 
-                "rss_3": lambda h, p : rss_3.start_tokio_server(
+                "rss": lambda h, p : rss.start_tokio_server(
                     self.name, 
                     {
                     "host": server_config.get("host") or h, 
