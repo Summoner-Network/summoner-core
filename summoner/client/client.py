@@ -19,6 +19,7 @@ target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__fil
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
+from summoner.client.api.client import SummonerAPIClient
 from summoner.utils import (
     load_config,
     )
@@ -141,6 +142,14 @@ class SummonerClient:
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
 
+        # [NEW] Attribute to hold the authenticated REST API client
+        self.api: Optional[SummonerAPIClient] = None
+
+        # [NEW] Attributes to hold API credentials from config
+        self._api_base_url: Optional[str] = None
+        self._api_username: Optional[str] = None
+        self._api_password: Optional[str] = None
+
     # ==== VERSION SPECIFIC ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
@@ -182,6 +191,12 @@ class SummonerClient:
         
         if self.send_queue_maxsize < self.max_concurrent_workers:
             self.logger.warning(f"queue_maxsize < concurrency_limit; back-pressure will throttle producers at {self.send_queue_maxsize}")
+        
+        # [NEW] Section to extract API client configuration
+        api_cfg = config.get("api", {})
+        self._api_base_url = api_cfg.get("base_url")
+        self._api_username = api_cfg.get("username")
+        self._api_password = api_cfg.get("password")
 
     def initialize(self):
         self._flow.ready()
@@ -1215,6 +1230,27 @@ class SummonerClient:
 
             # Block until every @receive / @send decorator has registered
             self.loop.run_until_complete(self._wait_for_registration())
+
+            # [NEW] The API Client Handshake
+            # Before starting the main loop, we initialize and authenticate the
+            # REST API client if credentials are provided.
+            if self._api_base_url and self._api_username and self._api_password:
+                self.logger.info("API client credentials found, initializing...")
+                self.api = SummonerAPIClient(base_url=self._api_base_url)
+
+                async def login_and_verify():
+                    # The test client's registerAndLogin creates a new user every time.
+                    # We'll adapt it to log in with provided credentials.
+                    # For this example, we assume a login method exists or is added.
+                    # Let's add a simple login method to ApiClient for this.
+                    # (See ApiClient modification below)
+                    creds = {"username": self._api_username, "password": self._api_password}
+                    await self.api.login(creds)
+                    self.logger.info(f"API client successfully authenticated as '{self.api.username}' (ID: {self.api.user_id})")
+
+                self.loop.run_until_complete(login_and_verify())
+            else:
+                self.logger.warning("No API credentials provided in config. `client.api` will be unavailable.")
 
             # Start the client logic
             self.loop.run_until_complete(self.run_client(host=host, port=port))
