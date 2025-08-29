@@ -1,28 +1,54 @@
-# BOSS API Documentation
+# BOSS API
 
-Base path: `/api`
+Base path `/api`
+Auth `Authorization: Bearer <JWT)`
+CORS enabled, Helmet on, JSON body limit 50 MB
+BigInt outputs are strings
 
-Auth: `Authorization: Bearer <JWT>`
+Tenant isolation
 
-Content type: `application/json`
-
-Tenant scoping: every request enforces that `:tenantId` equals the authenticated user’s stable bigint `id`.
+* Every route compares `:tenantId` to `authenticate(req).id` bigint
+* Mismatch returns `403`
 
 ---
 
-## Shared Rules
+## Data contracts
 
-* **IDs**: All bigint values (`tenantId`, `id`, `sourceId`, `targetId`, `time`, `position`) are accepted as bigint literals or decimal strings. Responses always render them as strings.
-* **Objects**
+Objects
 
-  * Schema: `(tenant BIGINT, type INT, id BIGSERIAL, version INT, attributes JSONB)`
-  * Primary key: `(tenant, type, id)`
-  * Concurrency: `version` increments on every update. Updates must supply the expected version or fail with `40001`.
-* **Associations**
+* Fields: `type` int, `id` bigint string, `version` int, `attrs` object
+* PK `(tenant, type, id)` with `id` BIGSERIAL
+* Optimistic concurrency on `version` with automatic bump on update
 
-  * Schema: `(tenant BIGINT, type TEXT, source_id BIGINT, target_id BIGINT, time BIGINT, position BIGINT, attributes JSONB)`
-  * Primary key: `(tenant, type, source_id, target_id)`
-  * Secondary index: `(tenant, type, source_id, position DESC)` for fast paging.
+Associations
+
+* Fields: `type` string, `sourceId` bigint string, `targetId` bigint string, `time` bigint string, `position` bigint string, `attrs` object
+* PK `(tenant, type, source_id, target_id)`
+* Secondary index `(tenant, type, source_id, position DESC)` for paging
+* `type` must be URL-safe per `isUrlSafe` in `routes/auth.ts`
+  Guidance: restrict to `[A-Za-z0-9._~-]` style tokens to pass
+
+BigInt handling
+
+* Inputs may be bigint or decimal strings
+* Outputs are strings
+* Request parsers reject non-integers
+
+Common validation
+
+* `attrs` must be a JSON object, not null, not array
+* `limit` default 50, max 1000
+* `otype` must be an integer
+* All IDs and cursors must be integers in string or bigint form
+
+Errors
+
+* `401` invalid or missing JWT
+* `403` tenant mismatch
+* `400` malformed params or body, limit overflow, invalid `type` per URL-safe check
+* `404` object not found
+* `500` storage or unexpected error
+  Logging includes route context like `[tenant/otype/id]`
 
 ---
 
@@ -32,15 +58,9 @@ Tenant scoping: every request enforces that `:tenantId` equals the authenticated
 
 `GET /api/objects/:tenantId/:otype/:id`
 
-Retrieve one object by type and id.
+Fetch a single object.
 
-**Path**
-
-* `:tenantId` bigint string
-* `:otype` integer
-* `:id` bigint string
-
-**200**
+200
 
 ```json
 {
@@ -51,13 +71,12 @@ Retrieve one object by type and id.
 }
 ```
 
-**Notes**
+Guidance
 
-* Enforces tenant ownership.
-* Returns `404` if the object does not exist.
-* Logs include `[tenantId/otype/id]` context.
+* Use for read-modify-write to obtain the latest `version`
+* Expect `404` for misses rather than empty payloads
 
-**Errors** 401, 403, 400, 404, 500
+Errors 401, 403, 400, 404, 500
 
 ---
 
@@ -67,43 +86,35 @@ Retrieve one object by type and id.
 
 Create or update an object.
 
-**Path**
-
-* `:tenantId` bigint string
-
-**Body**
+Body
 
 ```json
 {
   "type": 5001,
   "id": "0",
-  "version": 1,
-  "attrs": { "name": "agent-updated", "status": "inactive" }
+  "version": 0,
+  "attrs": { "name": "agent", "status": "active" }
 }
 ```
 
-**Behavior**
+Behavior
 
-* If `id` is `0` or omitted ⇒ insert (DB auto-generates ID).
-* If `id` is supplied ⇒ update with optimistic check. Fails if `version` does not match current row version.
-* Version bump is automatic.
+* Create when `id` omitted or `"0"`
+* Update when `id` present and `version` matches current row
+* On success returns generated or confirmed `id`
 
-**201**
+201
 
 ```json
 { "success": true, "id": "1234567890123456789" }
 ```
 
-**Errors**
+Guidance
 
-* `400` invalid body
-* `403` cross-tenant write
-* `500` version clash or storage error
+* Treat `40001` DB conflicts as `500` at the HTTP layer here, so implement client retries with fresh `version`
+* Never assume `id` reuse after delete
 
-**Guidance**
-
-* Always read the object first to get latest `version` before attempting an update.
-* Treat version clashes as retry signals.
+Errors 401, 403, 400, 500
 
 ---
 
@@ -111,9 +122,9 @@ Create or update an object.
 
 `DELETE /api/objects/:tenantId/:otype/:id`
 
-Delete the object and cascade all its associations.
+Hard delete object and all its associations.
 
-**200**
+200
 
 ```json
 { "success": true }
@@ -125,12 +136,12 @@ or
 { "success": false, "message": "Object may not have existed" }
 ```
 
-**Guidance**
+Guidance
 
-* Deletion is hard, not soft. Once gone, the id cannot be reused reliably.
-* All inbound and outbound associations for `(tenant, type, id)` are removed.
+* Operation is idempotent
+* Plan for eventual re-create at a different `id`
 
-**Errors** 401, 403, 400, 500
+Errors 401, 403, 400, 500
 
 ---
 
@@ -138,28 +149,22 @@ or
 
 `GET /api/objects/:tenantId/associations/:type/:sourceId`
 
-List associations by type from a source object.
+Stream associations from a source node, filtered and paged.
 
-**Path**
+Query
 
-* `:tenantId` bigint string
-* `:type` string
-* `:sourceId` bigint string
+* `targetId` bigint string optional exact filter
+* `after` bigint string cursor on `position`
+* `limit` int default 50, max 1000
 
-**Query**
-
-* `targetId` bigint string optional filter
-* `after` bigint string pagination cursor (position)
-* `limit` integer, default 50, max 1000
-
-**200**
+200
 
 ```json
 {
   "count": 1,
   "associations": [
     {
-      "type": "authored_by",
+      "type": "edge.monitor",
       "sourceId": "101",
       "targetId": "202",
       "time": "1756515600000",
@@ -170,13 +175,13 @@ List associations by type from a source object.
 }
 ```
 
-**Guidance**
+Guidance
 
-* `after` is a monotonic bigint cursor (often millisecond epoch). Use it for forward paging.
-* Limit queries to ≤1000 to avoid throttling.
-* Ordering is descending by `position`.
+* Ordering defined by `position DESC` in index, but API uses `after` as a monotonic cursor for forward paging patterns
+* Use wall-clock `time` for temporal semantics and `position` for strict ordering
+* `type` must pass `isUrlSafe`; non-conforming values return `400`
 
-**Errors** 401, 403, 400, 500
+Errors 401, 403, 400, 500
 
 ---
 
@@ -184,13 +189,13 @@ List associations by type from a source object.
 
 `PUT /api/objects/:tenantId/associations`
 
-Create or overwrite a directed association.
+Create or overwrite a directed edge.
 
-**Body**
+Body
 
 ```json
 {
-  "type": "monitors_model",
+  "type": "pipeline.step",
   "sourceId": "12345",
   "targetId": "67890",
   "time": "1756515600000",
@@ -199,23 +204,23 @@ Create or overwrite a directed association.
 }
 ```
 
-**Behavior**
+Behavior
 
-* PK `(tenant, type, sourceId, targetId)` is unique. PUT is idempotent.
-* If an association already exists, `time`, `position`, and `attrs` are updated.
+* Idempotent on PK `(tenant,type,sourceId,targetId)`
+* Existing edge gets `time`, `position`, `attrs` replaced
 
-**201**
+201
 
 ```json
 { "success": true }
 ```
 
-**Guidance**
+Guidance
 
-* Use monotonic `position` for ordered sequences (e.g. timelines).
-* Use `time` for wall-clock semantics.
+* Ensure `type` is URL-safe before sending
+* Choose `position` from a monotonic sequence generator to avoid collisions
 
-**Errors** 401, 403, 400, 500
+Errors 401, 403, 400, 500
 
 ---
 
@@ -223,33 +228,51 @@ Create or overwrite a directed association.
 
 `DELETE /api/objects/:tenantId/associations/:type/:sourceId/:targetId`
 
-Delete one association.
+Remove a single edge.
 
-**200**
+200
 
 ```json
 { "success": true }
 ```
 
-**Guidance**
+Guidance
 
-* Removal is absolute. Use re-PUT to restore.
-* Efficient due to primary key lookup.
+* Idempotent delete
+* Recreate by calling the PUT again with desired `time` and `position`
 
-**Errors** 401, 403, 400, 500
+Errors 401, 403, 400, 500
 
 ---
 
-## Operational Insights
+## Client patterns
 
-* **Security**: Helmet, CORS, and JWT are enforced before handlers run.
-* **Serialization**: BigInt polyfill ensures compatibility with JSON clients. All bigint outputs are stringified.
-* **Error Semantics**:
+Safe upsert loop
 
-  * `401` ⇒ no or invalid JWT
-  * `403` ⇒ tenant mismatch
-  * `400` ⇒ invalid param or body
-  * `404` ⇒ object missing
-  * `500` ⇒ DB exception (including version clash)
-* **Logging**: All route errors include contextual `[tenant/type/id]` in stderr.
-* **Storage Backends**: Works with PostgreSQL ≥12 and YugabyteDB ≥2.17. Uses JSONB and GIN indexes for schemaless queries outside this API’s scope.
+1. `GET object`
+2. Modify `attrs`
+3. `PUT` with unchanged `id` and fetched `version`
+4. On `500`, re-read and retry if policy allows
+
+Paging associations
+
+* Fetch first page with `limit`
+* Use the last item’s `position` for the next call’s `after`
+* Stop when `count` returns 0
+
+Validation hygiene
+
+* Encode all bigint fields as strings
+* Pre-validate association `type` against your URL-safe regex before calling
+* Keep `attrs` as a plain object only
+
+Operational
+
+* All errors are JSON with `error` or `{success:false,...}` bodies
+* Logs are structured and route-scoped
+* Behavior is consistent on PostgreSQL ≥12 and YugabyteDB ≥2.17
+
+Backward-compat notes
+
+* New `isUrlSafe` check rejects previously accepted association types that included spaces or unsafe characters
+* BigInt polyfill only affects serialization and matches the documented contract that all bigint outputs are strings
