@@ -190,10 +190,65 @@ class SummonerChainsAPIClient:
         path = f"/api/chains/append/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
         return await self._client._request("POST", path, 201, json_body=data)
         
+    async def prepend(self, chain_key: Dict, data: Dict) -> Dict:
+        self._client._check_auth("prepend")
+        path = f"/api/chains/prepend/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("POST", path, 201, json_body=data)
+
     async def get_metadata(self, chain_key: Dict) -> Dict:
         self._client._check_auth("get_metadata")
         path = f"/api/chains/metadata/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
         return await self._client._request("GET", path, 200)
+
+    async def get_block(self, chain_key: Dict, block_idx: Union[str, int]) -> Dict:
+        self._client._check_auth("get_block")
+        path = f"/api/chains/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}/{block_idx}"
+        return await self._client._request("GET", path, 200)
+
+    async def get_first(self, chain_key: Dict) -> Dict:
+        self._client._check_auth("get_first")
+        path = f"/api/chains/first/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200)
+
+    async def get_last(self, chain_key: Dict) -> Dict:
+        self._client._check_auth("get_last")
+        path = f"/api/chains/last/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200)
+
+    async def get_range(self, chain_key: Dict, params: Dict) -> Dict:
+        self._client._check_auth("get_range")
+        path = f"/api/chains/range/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200, params=params)
+
+    async def get_recent(self, chain_key: Dict, params: Dict) -> Dict:
+        self._client._check_auth("get_recent")
+        path = f"/api/chains/recent/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200, params=params)
+
+    async def validate(self, chain_key: Dict) -> Dict:
+        self._client._check_auth("validate")
+        path = f"/api/chains/validate/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200)
+
+    async def delete(self, chain_key: Dict) -> Dict:
+        self._client._check_auth("delete")
+        path = f"/api/chains/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("DELETE", path, 200)
+
+    async def get_stats(self, tenant: str) -> Dict:
+        self._client._check_auth("get_stats")
+        path = f"/api/chains/stats/{tenant}"
+        return await self._client._request("GET", path, 200)
+
+    async def get_block_metadata(self, chain_key: Dict, block_idx: Union[str, int]) -> Dict:
+        self._client._check_auth("get_block_metadata")
+        path = f"/api/chains/metadata/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}/{block_idx}"
+        return await self._client._request("GET", path, 200)
+    
+    async def get_blocks_range_metadata(self, chain_key: Dict, params: Dict) -> Dict:
+        self._client._check_auth("get_blocks_range_metadata")
+        path = f"/api/chains/metadata/range/{self._client.username}/{chain_key['chainName']}/{chain_key['shardId']}"
+        return await self._client._request("GET", path, 200, params=params)
 
 class SummonerAPIClient(_BaseClient):
     """
@@ -219,42 +274,27 @@ class SummonerAPIClient(_BaseClient):
         Performs session narrowing. If authenticated with a primary credential
         (password), this method provisions a new, single-use API key and
         re-authenticates the client with it.
-
-        This is a security best practice for spawning long-running or less-trusted
-        processes, as the new session is less privileged and can be individually
-        revoked.
-
-        Returns the new API key on success, or None if the session was already
-        narrowed (i.e., authenticated via an API key).
         """
         self._check_auth("narrow")
 
         if self.auth_method == 'key':
-            # Session is already narrowed, do nothing.
             return None
         
         if self.auth_method != 'password':
-            # This should not happen in a normal flow.
             raise RuntimeError(f"Cannot narrow session from an unknown or unsupported auth method: {self.auth_method}")
 
-        # 1. Generate a new, cryptographically secure secret.
         new_secret_bytes = os.urandom(32)
         new_secret_hex = f"0x{new_secret_bytes.hex()}"
         
-        # 2. Use the current primary session to provision the new secret.
         assoc_res = await self.auth.associate_secret(new_secret_hex)
         confirmed_secret = assoc_res.get("secret")
         if not confirmed_secret:
             raise APIError("Failed to associate new secret: server did not confirm the secret.", 500, json.dumps(assoc_res))
 
-        # 3. Construct the composite API key for the new session.
         api_key = f"{self.username}%{confirmed_secret}"
         
-        # 4. Re-authenticate (login) with the new, less-privileged key.
-        # This overwrites the client's internal state (token, auth_method, etc.)
         await self.login({"key": api_key})
         
-        # 5. Return the new key for external use (e.g., passing to a subprocess).
         return api_key
 
     async def close(self):
