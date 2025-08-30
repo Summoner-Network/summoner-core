@@ -22,6 +22,9 @@ if __name__ == "__main__":
     @myagent.send(route="custom_send")
     async def custom_send():
         content = await ainput("s> ")
+        if (content == "narrow"):
+            key = await myagent.api.narrow()
+            print(f"API KEY: {key}")
         return content
 
     # The only change is adding the config_path argument here

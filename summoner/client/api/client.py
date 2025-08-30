@@ -1,5 +1,6 @@
 import httpx
 import json
+import os
 from typing import Optional, Any, Dict, Union
 
 # Define a custom exception for clarity
@@ -127,13 +128,13 @@ class SummonerAuthAPIClient:
     async def associate_secret(self, secret: str) -> Dict:
         self._client._check_auth("associate_secret")
         if self._client.auth_method != 'password':
-            raise PermissionError("Cannot provision new secrets when authenticated with an API key.")
+            raise PermissionError("Cannot provision new secrets when authenticated with a primary user session.")
         return await self._client._request("POST", "/api/agent/associate", 200, json_body={"secret": secret})
 
     async def revoke_secret(self, secret: str) -> Dict:
         self._client._check_auth("revoke_secret")
         if self._client.auth_method != 'password':
-            raise PermissionError("Cannot revoke secrets when authenticated with an API key.")
+            raise PermissionError("Cannot revoke secrets when authenticated with a primary user session.")
         return await self._client._request("POST", "/api/agent/revoke", 200, json_body={"secret": secret})
 
     async def check_secret(self, account_id: Union[str, int], secret: str) -> Dict:
@@ -213,6 +214,49 @@ class SummonerAPIClient(_BaseClient):
         """
         await self.auth.login(creds)
     
+    async def narrow(self) -> Optional[str]:
+        """
+        Performs session narrowing. If authenticated with a primary credential
+        (password), this method provisions a new, single-use API key and
+        re-authenticates the client with it.
+
+        This is a security best practice for spawning long-running or less-trusted
+        processes, as the new session is less privileged and can be individually
+        revoked.
+
+        Returns the new API key on success, or None if the session was already
+        narrowed (i.e., authenticated via an API key).
+        """
+        self._check_auth("narrow")
+
+        if self.auth_method == 'key':
+            # Session is already narrowed, do nothing.
+            return None
+        
+        if self.auth_method != 'password':
+            # This should not happen in a normal flow.
+            raise RuntimeError(f"Cannot narrow session from an unknown or unsupported auth method: {self.auth_method}")
+
+        # 1. Generate a new, cryptographically secure secret.
+        new_secret_bytes = os.urandom(32)
+        new_secret_hex = f"0x{new_secret_bytes.hex()}"
+        
+        # 2. Use the current primary session to provision the new secret.
+        assoc_res = await self.auth.associate_secret(new_secret_hex)
+        confirmed_secret = assoc_res.get("secret")
+        if not confirmed_secret:
+            raise APIError("Failed to associate new secret: server did not confirm the secret.", 500, json.dumps(assoc_res))
+
+        # 3. Construct the composite API key for the new session.
+        api_key = f"{self.username}%{confirmed_secret}"
+        
+        # 4. Re-authenticate (login) with the new, less-privileged key.
+        # This overwrites the client's internal state (token, auth_method, etc.)
+        await self.login({"key": api_key})
+        
+        # 5. Return the new key for external use (e.g., passing to a subprocess).
+        return api_key
+
     async def close(self):
         """Closes the underlying httpx client session."""
         await super().close()

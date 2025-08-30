@@ -146,9 +146,7 @@ class SummonerClient:
         self.api: Optional[SummonerAPIClient] = None
 
         # [NEW] Attributes to hold API credentials from config
-        self._api_base_url: Optional[str] = None
-        self._api_username: Optional[str] = None
-        self._api_password: Optional[str] = None
+        self._api_creds: Optional[dict] = None
 
     # ==== VERSION SPECIFIC ====
 
@@ -194,9 +192,8 @@ class SummonerClient:
         
         # [NEW] Section to extract API client configuration
         api_cfg = config.get("api", {})
-        self._api_base_url = api_cfg.get("base_url")
-        self._api_username = api_cfg.get("username")
-        self._api_password = api_cfg.get("password")
+        self._api_base_url = api_cfg.get("base_url", None)
+        self._api_creds = api_cfg.get("credentials") if api_cfg else None
 
     def initialize(self):
         self._flow.ready()
@@ -1234,7 +1231,7 @@ class SummonerClient:
             # [NEW] The API Client Handshake
             # Before starting the main loop, we initialize and authenticate the
             # REST API client if credentials are provided.
-            if self._api_base_url and self._api_username and self._api_password:
+            if self._api_base_url:
                 self.logger.info("API client credentials found, initializing...")
                 self.api = SummonerAPIClient(base_url=self._api_base_url)
 
@@ -1244,8 +1241,7 @@ class SummonerClient:
                     # For this example, we assume a login method exists or is added.
                     # Let's add a simple login method to ApiClient for this.
                     # (See ApiClient modification below)
-                    creds = {"username": self._api_username, "password": self._api_password}
-                    await self.api.login(creds)
+                    await self.api.login(self._api_creds)
                     self.logger.info(f"API client successfully authenticated as '{self.api.username}' (ID: {self.api.user_id})")
 
                 self.loop.run_until_complete(login_and_verify())

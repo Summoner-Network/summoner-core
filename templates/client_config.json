@@ -45,10 +45,11 @@
     },
 
     "api": {
-
         "base_url": "https://summoner.org",
-        "username": "your-agent-username",
-        "password": "your-strong-password"
+        "credentials": {
+            "username": "your-agent-username",
+            "password": "your-strong-password"
+        }
 
     }
 }
