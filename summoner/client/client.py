@@ -903,7 +903,7 @@ class SummonerClient:
                     async with self.routes_lock:
                         sender_parsed_routes: dict[str, ParsedRoute] = self.sender_parsed_routes.copy()
                     
-                    pending = []
+                    pending: list[tuple[Union[int, tuple[int, ...]], str, ParsedRoute, Event]] = []
                     try:
                         while True:
                             pending.append(self.event_bridge.get_nowait())
@@ -925,9 +925,19 @@ class SummonerClient:
                             if sender_parsed_route is None:
                                 continue
                             
+                            # for (priority, key, parsed_route, event) in pending:
+                            #     if sender_parsed_route == parsed_route and sender.responds_to(event):
+                            #         senders.append((route, sender))
+
                             for (priority, key, parsed_route, event) in pending:
-                                if sender_parsed_route == parsed_route and sender.responds_to(event):
+                                # Use accept-logic to multiple process triggered receive events at once
+                                source_accept = all([any([n.accepts(m) for m in parsed_route.source]) for n in sender_parsed_route.source])
+                                label_accept = all([any([n.accepts(m) for m in parsed_route.label]) for n in sender_parsed_route.label])
+                                target_accept = all([any([n.accepts(m) for m in parsed_route.label]) for n in sender_parsed_route.label])
+                                if source_accept and label_accept and target_accept and sender.responds_to(event):
+                                    # Adding existential occurences (to prevent race)
                                     senders.append((route, sender))
+                                    break
                                     
                 # ----[ Empty: Skip and Prevent Client Overwhelming | Almost full: warning ]----
                 if not senders:
