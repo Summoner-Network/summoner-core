@@ -122,4 +122,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///local.db")
 SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
 ```
 
-At this point, your development environment should be fully configured and ready to use. You can now launch the server or begin contributing code. For more details, refer to the [contribution guide](doc_contribute_to_server.md).
+At this point, your development environment should be fully configured and ready to use. You can now launch a server or run clients to explore and test the code.
+
+
+## 🤝 Contributions
+
+This repository is open source for visibility and usage. External developers are welcome to [open issues](../../issues) to report bugs, suggest improvements, or request new features.
+
+Direct code contributions to this repository are limited to internal team members.
+
+If you would like to extend the project, we encourage you to explore our [documentation](https://github.com/Summoner-Network/summoner-docs/) on building modules and to use the [SDK template repository](https://github.com/Summoner-Network/summoner-sdk) as a starting point for creating safe, compatible extensions.
+
