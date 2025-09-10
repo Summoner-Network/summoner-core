@@ -123,7 +123,7 @@ class SummonerClient:
         self.batch_drain = None
 
         # Pass Event information from the receiving end to the sending end
-        self.event_bridge: Optional[asyncio.Queue[tuple[tuple[int, ...], str, ParsedRoute, Event]]] = None
+        self.event_bridge: Optional[asyncio.Queue[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]] = None
 
         self.send_queue: Optional[asyncio.Queue] = None
         self.send_workers_started = False  # To avoid double-starting workers
@@ -718,7 +718,7 @@ class SummonerClient:
                     
                     # ----[ Exec: Prepare Passage Receiver → Sender ]----
                     if self._flow.in_use:
-                        event_buffer: dict[tuple[int, ...], list[tuple[str, ParsedRoute, Event]]]  = defaultdict(list)
+                        event_buffer: dict[tuple[int, ...], list[tuple[Optional[str], ParsedRoute, Event]]]  = defaultdict(list)
 
                     # ----[ Exec: Run Batches in Order ]----
                     for priority, batch_fns in sorted(batches.items(), key=lambda kv: kv[0]):
@@ -914,25 +914,27 @@ class SummonerClient:
                     async with self.routes_lock:
                         sender_parsed_routes: dict[str, ParsedRoute] = self.sender_parsed_routes.copy()
                     
-                    pending: list[tuple[Union[int, tuple[int, ...]], str, ParsedRoute, Event]] = []
+                    pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = []
                     try:
                         while True:
                             pending.append(self.event_bridge.get_nowait())
                     except asyncio.QueueEmpty:
                         pass
+                    
+                    pending.sort(key=lambda it: hook_priority_order(it[0]))
 
                 # ----[ Build Sender Batch ]---- 
                 senders: list[tuple[str, Sender]] = []
 
                 # De-dup set: at most one sender per (route, key-from-recv) this cycle.
                 # `key` is what your receiver/tape activation produced (e.g. "initiator:<peer_id>").
-                emitted: set[tuple[str, Optional[str]]] = set()
+                emitted: set[tuple[str, Optional[str], str]] = set()
 
                 for route, routed_senders in sender_index.items():
                     for sender in routed_senders:
                         
                         # Non-reactive (no actions/triggers): preserve current behavior
-                        if not self._flow.in_use or sender.actions is None and sender.triggers is None:
+                        if (not self._flow.in_use) or (sender.actions is None and sender.triggers is None):
                             senders.append((route, sender))
                         
                         # Reactive: require matching a pending activation (existential)
@@ -946,7 +948,7 @@ class SummonerClient:
                             # Iterate pending in queue order; first match "wins" for this (route,key)
                             for (priority, key, parsed_route, event) in pending:
                                 if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
-                                    dedup_key = (route, key)  # key scopes to the activation thread/peer
+                                    dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
                                     if dedup_key not in emitted:
                                         senders.append((route, sender))
                                         emitted.add(dedup_key)
