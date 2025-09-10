@@ -886,6 +886,17 @@ class SummonerClient:
             writer: asyncio.StreamWriter, 
             stop_event: asyncio.Event
         ):
+
+        # ----[ Helper: Matches Routes Between Senders and Receivers to Trigger Send ]----
+        def _route_accepts(
+                sender_pr: ParsedRoute, 
+                receiver_pr: ParsedRoute
+            ) -> bool:
+            source_ok   = all(any(n.accepts(m)  for m in receiver_pr.source)     for n in sender_pr.source)
+            label_ok    = all(any(n.accepts(m)  for m in receiver_pr.label)      for n in sender_pr.label)
+            target_ok   = all(any(n.accepts(m)  for m in receiver_pr.target)     for n in sender_pr.target)
+            return source_ok and label_ok and target_ok
+
         cancelled = False
         try:
 
@@ -912,12 +923,19 @@ class SummonerClient:
 
                 # ----[ Build Sender Batch ]---- 
                 senders: list[tuple[str, Sender]] = []
+
+                # De-dup set: at most one sender per (route, key-from-recv) this cycle.
+                # `key` is what your receiver/tape activation produced (e.g. "initiator:<peer_id>").
+                emitted: set[tuple[str, Optional[str]]] = set()
+
                 for route, routed_senders in sender_index.items():
                     for sender in routed_senders:
                         
+                        # Non-reactive (no actions/triggers): preserve current behavior
                         if not self._flow.in_use or sender.actions is None and sender.triggers is None:
                             senders.append((route, sender))
                         
+                        # Reactive: require matching a pending activation (existential)
                         elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or 
                                    (sender.triggers and isinstance(sender.triggers, set))):
                             
@@ -925,19 +943,14 @@ class SummonerClient:
                             if sender_parsed_route is None:
                                 continue
                             
-                            # for (priority, key, parsed_route, event) in pending:
-                            #     if sender_parsed_route == parsed_route and sender.responds_to(event):
-                            #         senders.append((route, sender))
-
+                            # Iterate pending in queue order; first match "wins" for this (route,key)
                             for (priority, key, parsed_route, event) in pending:
-                                # Use accept-logic to multiple process triggered receive events at once
-                                source_accept   = all(any(n.accepts(m) for m in parsed_route.source)    for n in sender_parsed_route.source)
-                                label_accept    = all(any(n.accepts(m) for m in parsed_route.label)     for n in sender_parsed_route.label)
-                                target_accept   = all(any(n.accepts(m) for m in parsed_route.target)    for n in sender_parsed_route.target)
-                                if source_accept and label_accept and target_accept and sender.responds_to(event):
-                                    # Adding existential occurences (to prevent race)
-                                    senders.append((route, sender))
-                                    break
+                                if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
+                                    dedup_key = (route, key)  # key scopes to the activation thread/peer
+                                    if dedup_key not in emitted:
+                                        senders.append((route, sender))
+                                        emitted.add(dedup_key)
+                                    break  # do not enqueue multiple times for this sender this cycle
                                     
                 # ----[ Empty: Skip and Prevent Client Overwhelming | Almost full: warning ]----
                 if not senders:
