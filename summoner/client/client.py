@@ -926,8 +926,7 @@ class SummonerClient:
                 # ----[ Build Sender Batch ]---- 
                 senders: list[tuple[str, Sender]] = []
 
-                # De-dup set: at most one sender per (route, key-from-recv) this cycle.
-                # `key` is what your receiver/tape activation produced (e.g. "initiator:<peer_id>").
+                # De-dup set: at most one sender per (route, key-from-recv, recv-handler-name) this cycle.
                 emitted: set[tuple[str, Optional[str], str]] = set()
 
                 for route, routed_senders in sender_index.items():
@@ -945,7 +944,7 @@ class SummonerClient:
                             if sender_parsed_route is None:
                                 continue
                             
-                            # Iterate pending in queue order; first match "wins" for this (route,key)
+                            # Iterate pending in queue order; first match "wins" for this (route,key,fn_name)
                             for (priority, key, parsed_route, event) in pending:
                                 if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
                                     dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
