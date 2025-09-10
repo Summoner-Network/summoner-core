@@ -931,9 +931,9 @@ class SummonerClient:
 
                             for (priority, key, parsed_route, event) in pending:
                                 # Use accept-logic to multiple process triggered receive events at once
-                                source_accept = all([any([n.accepts(m) for m in parsed_route.source]) for n in sender_parsed_route.source])
-                                label_accept = all([any([n.accepts(m) for m in parsed_route.label]) for n in sender_parsed_route.label])
-                                target_accept = all([any([n.accepts(m) for m in parsed_route.label]) for n in sender_parsed_route.label])
+                                source_accept   = all(any(n.accepts(m) for m in parsed_route.source)    for n in sender_parsed_route.source)
+                                label_accept    = all(any(n.accepts(m) for m in parsed_route.label)     for n in sender_parsed_route.label)
+                                target_accept   = all(any(n.accepts(m) for m in parsed_route.target)    for n in sender_parsed_route.target)
                                 if source_accept and label_accept and target_accept and sender.responds_to(event):
                                     # Adding existential occurences (to prevent race)
                                     senders.append((route, sender))
