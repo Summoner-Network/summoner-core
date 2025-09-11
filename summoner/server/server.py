@@ -150,6 +150,7 @@ class SummonerServer:
     ):
         
         if config_dict is None:
+            # Load config parameters
             server_config = load_config(config_path=config_path, debug=True)
         elif isinstance(config_dict, dict):
             # Shallow copy to avoid external mutation

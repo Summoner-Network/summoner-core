@@ -1224,11 +1224,21 @@ class SummonerClient:
             self, 
             host: str = '127.0.0.1', 
             port: int = 8888, 
-            config_path: Optional[str] = None
+            config_path: Optional[str] = None,
+            config_dict: Optional[dict[str, Any]] = None,
         ):
         try:
-            # Load config parameters
-            client_config = load_config(config_path=config_path, debug=True)
+            
+            if config_dict is None:
+                # Load config parameters
+                client_config = load_config(config_path=config_path, debug=True)
+            elif isinstance(config_dict, dict):
+                # Shallow copy to avoid external mutation
+                client_config = dict(config_dict)  
+            else:
+                raise TypeError(f"SummonerClient.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
+            
+            # client_config = load_config(config_path=config_path, debug=True)
             self._apply_config(client_config)
 
             # Compile Regex information to parse the flow
