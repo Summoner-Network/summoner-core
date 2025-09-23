@@ -140,6 +140,10 @@ class SummonerClient:
         self._dna_receivers: list[dict] = []
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
+        self.profit = 0
+
+    def charge(self, amount: float):
+        self.profit += amount
 
     # ==== VERSION SPECIFIC ====
 
