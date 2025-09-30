@@ -9,7 +9,7 @@ if [ "$#" -ge 2 ]; then
   CMD="$2"
 else
   WORKDIR="$(pwd)"
-  CMD="source venv/bin/activate && python ./examples/demo_seller_agent/agent.py"
+  CMD="source venv/bin/activate && python ./examples/1_chat_agents/chat_agent.py"
 fi
 
 # ─────────────────────────────────────────────────────
