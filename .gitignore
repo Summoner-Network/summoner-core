@@ -1,7 +1,7 @@
 # Remy's
 trash/
 experiments/
-.DS_Store
+*.DS_Store
 *.log.[1-9]
 *.mov
 *.db
