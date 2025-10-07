@@ -1,7 +1,7 @@
 # Summoner Core SDK
 
 <p align="center">
-<img width="500px" src="assets/img/summoner_user_rounded.png" />
+<img width="500px" src="assets/img/summoner_user_rounded_180.png" />
 </p>
 
 > The **Summoner Core SDK** is the foundation of the Summoner protocol, providing a minimal, composable runtime for building and coordinating autonomous agents.
