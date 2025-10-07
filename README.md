@@ -8,11 +8,11 @@
 
 This core SDK exposes the **hooks**, **communication layer**, and **execution model** needed to support decentralized identities, reputation-aware messaging, programmable automations, and orchestration.
 
-## 📚 Documentation
+## Documentation
 
 The core codebase is thoroughly documented in our **official documentation**, available on our GitHub page [here](https://github.com/Summoner-Network/summoner-docs).
 
-## 🛠️ Installation
+## Installation
 
 Before running the platform, ensure that both **Python** and **Rust** are installed on your system. The `setup.sh` script will then take care of configuring the environment and compiling necessary components.
 
@@ -83,26 +83,8 @@ This script performs the following actions:
 - Installs required **Python packages** listed in `requirements.txt`
 - Generates a default **`.env`** file with configuration placeholders
 - Installs all available **Rust server implementations**, using `Cargo.lock` to ensure consistent builds
-- ✨ **[NEW]** Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
+- Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
 
-
-#### What This Means for Imports
-
-With `summoner` installed as an editable pip package, you can write imports like:
-
-```python
-from summoner.server import SummonerServer
-```
-
-... without modifying your `PYTHONPATH`.
-
-Previously, without a proper package installation, you needed boilerplate like:
-
-```python
-target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if target_path not in sys.path:
-    sys.path.insert(0, target_path)
-```
 
 ### 4. Configure Environment Variables
 
@@ -125,7 +107,38 @@ SECRET_KEY = os.getenv("SECRET_KEY", "devsecret")
 At this point, your development environment should be fully configured and ready to use. You can now launch a server or run clients to explore and test the code.
 
 
-## 🤝 Contributions
+## Quick smoke tests
+
+Use the ready-made scripts `open_server.sh` and `open_client.sh` in the repo root to verify your install. 
+
+**POSIX (macOS/Linux)**
+
+```bash
+# terminal A
+source venv/bin/activate
+bash open_server.sh
+
+# terminal B
+source venv/bin/activate
+bash open_client.sh
+```
+
+**Windows**
+Use **Git Bash** (or WSL). Activate the venv then run the scripts with Bash:
+
+```bash
+source venv/Scripts/activate
+bash ./open_server.sh   # terminal A
+bash ./open_client.sh   # terminal B
+```
+
+If needed: `chmod +x open_server.sh open_client.sh`.
+
+**Expected**
+Server starts and listens and client connects and can send messages through a chat interactive window. If anything fails, re-run `source setup.sh` and try again.
+
+
+## Contributions
 
 This repository is open source for visibility and usage. External developers are welcome to [open issues](../../issues) to report bugs, suggest improvements, or request new features.
 
