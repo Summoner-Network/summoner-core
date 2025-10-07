@@ -1,7 +1,7 @@
 # Agent-Based Price Negotiation Protocol
 
 <p align="center">
-<img width="300px" src="../../img/merchants.png" />
+<img width="300px" src="../../assets/img/merchants.png" />
 </p>
 
 This README provides a detailed walkthrough of an **automated negotiation protocol** between two autonomous agents: **SellerAgent** and **BuyerAgent**. The protocol demonstrates **asynchronous communication**, **dynamic pricing strategies**, **randomized behaviors**, and **real-time tracking of negotiation outcomes**.
@@ -23,7 +23,7 @@ Each negotiation round uses **randomized initial prices** and **adjustments**, m
 The following animation shows a **real-time exchange** between the BuyerAgent and SellerAgent during negotiation:
 
 <p align="center">
-<img width="800px" src="../../img/merchants_demo.gif" />
+<img width="800px" src="../../assets/gifs/merchants_demo.gif" />
 </p>
 
 You can observe how each agent proposes, counters, and dynamically adjusts their offers before reaching an agreement, or terminating the negotiation.
@@ -31,7 +31,7 @@ You can observe how each agent proposes, counters, and dynamically adjusts their
 The BuyerAgent and SellerAgent are designed to handle negotiations in noisy environments where many interactions occur concurrently. The following demo illustrates this by running two sellers and two buyers — resulting in eight simultaneous negotiations—on a single server instance.
 
 <p align="center">
-<img width="800px" src="../../img/2sellers_2buyers.gif" />
+<img width="800px" src="../../assets/gifs/2sellers_2buyers.gif" />
 </p>
 
 
