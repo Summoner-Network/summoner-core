@@ -3,7 +3,7 @@ import asyncio
 import uuid
 from pathlib import Path
 from summoner.client import SummonerClient
-from db_files.db_sdk import (
+from db_sdk import (
     configure_db_path,
     init_db,
     create_or_reset_state,
