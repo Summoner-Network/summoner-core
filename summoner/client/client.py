@@ -3,7 +3,8 @@ import sys
 import json
 from typing import (
     Optional, 
-    Callable, 
+    Callable,
+    TypedDict, 
     Union, 
     Awaitable, 
     Any, 
@@ -50,6 +51,11 @@ from summoner.protocol.payload import (
     wrap_with_types, 
     recover_with_types,
 )
+
+class WrappedPayload(TypedDict):
+    """Defines the server's message envelope, including sender address and content."""
+    remote_addr: str
+    content: Union[str, dict] # PayloadType is our Union of RPCRequest, RPCResponse, etc.
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
@@ -358,7 +364,7 @@ class SummonerClient:
             priority: Union[int, tuple[int, ...]] = ()
         ):
         route = route.strip()
-        def decorator(fn: Callable[[Union[str, dict]], Awaitable[Optional[Event]]]):
+        def decorator(fn: Callable[[WrappedPayload], Awaitable[Optional[Event]]]):
             
             # ----[ Safety Checks ]----
             
