@@ -55,7 +55,8 @@ from summoner.protocol.payload import (
 class WrappedPayload(TypedDict):
     """Defines the server's message envelope, including sender address and content."""
     remote_addr: str
-    content: Union[str, dict] # PayloadType is our Union of RPCRequest, RPCResponse, etc.
+    # If the content is readable as JSON, it will be a dict; otherwise, a string
+    content: Union[str, dict]
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
