@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 // Arc is an atomic reference counter for shared ownership across threads/tasks.
 // Mutex provides safe, asynchronous locking for mutable data.
-// We'll use Arc<Mutex<...>> to share a client's writer handle safely.
+// We'll use Arc<Mutex<...>> to share a connection's writer handle safely.
 use std::sync::Arc;
 
 // Tokio's non-blocking TCP listener and stream for incoming/outgoing connections.
@@ -79,14 +79,27 @@ pub struct Client {
 // - RwLock lets many readers (e.g. broadcasts) but only one writer (add/remove) at a time.
 pub type ClientList = Arc<RwLock<Vec<Client>>>;
 
+/// **Represents a connection to another server instance in the mesh.**
+#[derive(Clone)]
+pub struct Peer {
+    /// The peer's configured address string (e.g., "10.0.0.2:8888")
+    pub addr: String,
+    /// The write-half of the TCP stream for sending messages to this peer.
+    pub writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+}
+
+/// **A shared, asynchronous list of all connected peers.**
+pub type PeerList = Arc<RwLock<Vec<Peer>>>;
+
 
 /// === RUN_SERVER ===
 
 /// This function launches the main server loop:
 /// - Binds to the provided host and port
+/// - Spawns tasks to connect to peers
 /// - Sets up shared state and channels
 /// - Spawns background tasks for shutdown, backpressure, quarantine cleanup
-/// - Starts listening for incoming client connections
+/// - Starts listening for incoming client and peer connections
 pub async fn run_server(
     config: ServerConfig,
     logger: Logger,
@@ -100,9 +113,10 @@ pub async fn run_server(
     // Tell our logger that the server is up and running
     logger.info(&format!("🚀 Rust server listening on {}", addr));
 
-    // Prepare an empty, shared list of connected clients
+    // Prepare shared lists for connected clients and peers
     // Wrapped in Arc+RwLock so many tasks can read, but only one can write at a time
     let clients: ClientList = Arc::new(RwLock::new(Vec::new()));
+    let peers: PeerList = Arc::new(RwLock::new(Vec::new()));
 
     // Create a broadcast channel for shutdown signals
     // `shutdown_tx` sends the signal; `shutdown_rx` receives it in each task
@@ -122,6 +136,23 @@ pub async fn run_server(
     let quarantine_list = Arc::new(Mutex::new(
         QuarantineList::new(Duration::from_secs(config.quarantine_cooldown_secs))
     ));
+
+    // Spawn a task to proactively connect to all configured peers.
+    if let Some(peer_addresses) = &config.peer_addresses {
+        for peer_addr in peer_addresses {
+            // Don't connect to ourself.
+            if Some(peer_addr) == config.local_address.as_ref() {
+                continue;
+            }
+            spawn_peer_connector(
+                peer_addr.clone(),
+                peers.clone(),
+                clients.clone(),
+                shutdown_tx.subscribe(),
+                logger.clone(),
+            );
+        }
+    }
 
     // Spawn a background task that every N seconds removes old entries from quarantine
     // We keep the JoinHandle so we can cancel it cleanly on shutdown
@@ -144,11 +175,12 @@ pub async fn run_server(
         config.backpressure_policy.clone(),
     );
 
-    // Hand off to the function that loops accepting new clients and handling commands
+    // Hand off to the function that loops accepting new connections and handling commands
     // We await it so we stay here until all clients have disconnected and shutdown is complete
     accept_connections(
         listener,
         clients,
+        peers,
         shutdown_tx,
         shutdown_rx,
         backpressure_tx,
@@ -189,11 +221,12 @@ fn spawn_shutdown_listener(
 
 /// === CONNECTIONS ===
 
-/// Listens for new clients, spawns per-client tasks, and handles shutdown/backpressure
+/// Listens for new clients/peers, spawns per-connection tasks, and handles shutdown/backpressure
 async fn accept_connections(
     listener: TcpListener,                      // TCP socket we bound in run_server
     clients: ClientList,                        // Shared list of connected clients
-    shutdown_tx: broadcast::Sender<()>,         // Sender to broadcast shutdown to clients
+    peers: PeerList,                            // Shared list of connected peers
+    shutdown_tx: broadcast::Sender<()>,         // Sender to broadcast shutdown to all tasks
     mut shutdown_rx: broadcast::Receiver<()>,   // Receiver to hear the shutdown signal
     backpressure_tx: mpsc::Sender<(SocketAddr, usize)>, // Where client tasks report queue sizes
     mut command_rx: mpsc::Receiver<BackpressureCommand>, // Commands from the backpressure monitor
@@ -201,31 +234,28 @@ async fn accept_connections(
     config: ServerConfig,                       // All of our runtime settings
     logger: Logger,                             // Logging handle
 ) {
-    // A simple counter to track how many clients are currently connected
     let connection_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
-    // We loop forever (or until a shutdown signal breaks us out)
     loop {
         tokio::select! {
-            // 1) New client arrives
+            // 1) New connection arrives
             accept_result = listener.accept() => {
                 match accept_result {
-                    // If accept succeeds, we get a TCP stream and the peer address
                     Ok((stream, addr)) => {
-                        // Hand off the new connection to its own async function
+                        // Dispatch the new connection to the correct handler
                         handle_new_connection(
                             stream,
                             addr,
                             &clients,
+                            &peers,
                             &shutdown_tx,
                             &backpressure_tx,
                             &quarantine_list,
-                            connection_count.clone(), // share the counter
+                            connection_count.clone(),
                             &config,
                             &logger,
                         ).await;
                     }
-                    // If accept failed (e.g. too many open files), warn and pause briefly
                     Err(e) => {
                         logger.warn(&format!("⚠️ Failed to accept connection: {}", e));
                         time::sleep(Duration::from_millis(config.accept_error_backoff_ms)).await;
@@ -235,15 +265,12 @@ async fn accept_connections(
 
             // 2) A backpressure monitor command arrives (throttle, flow-control, disconnect)
             Some(cmd) = command_rx.recv() => {
-                // Apply it immediately to the matching client(s)
                 handle_backpressure_command(cmd, &clients, &quarantine_list, &logger).await;
             }
 
             // 3) A global shutdown signal arrived (e.g. Ctrl+C)
             _ = shutdown_rx.recv() => {
-                // Log that we're beginning graceful shutdown
                 logger.info("🧹 Server received shutdown signal.");
-                // Break out of the loop so run_server can clean up
                 break;
             }
         }
@@ -280,7 +307,6 @@ async fn handle_backpressure_command(
                 _ => unreachable!(),
             };
 
-            // Under a short read lock, grab a clone of the sender if the client still exists
             let maybe_tx = {
                 let clients = clients.read().await;
                 clients
@@ -289,7 +315,6 @@ async fn handle_backpressure_command(
                     .map(|c| c.control_tx.clone())
             };
 
-            // Now drop the lock and actually send the command
             if let Some(tx) = maybe_tx {
                 if let Err(e) = tx.try_send(control_cmd) {
                     logger.warn(&format!(
@@ -312,66 +337,116 @@ async fn handle_backpressure_command(
     }
 }
 
-/// Validates a new TCP connection and then spawns its session task
+/// **Determines if a connection is a client or a peer, then dispatches it.**
 async fn handle_new_connection(
-    stream: TcpStream,                           // The raw TCP connection
-    addr: SocketAddr,                            // Remote client address (IP:port)
-    clients: &ClientList,                        // Shared list of all active clients
-    shutdown_tx: &broadcast::Sender<()>,         // Sender to broadcast shutdown to each client
-    backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>, // Where clients report their queue sizes
-    quarantine_list: &Arc<Mutex<QuarantineList>>, // Tracks temporarily banned clients
-    connection_count: Arc<std::sync::atomic::AtomicUsize>, // Global counter of active clients
-    config: &ServerConfig,                       // All runtime settings
-    logger: &Logger,                             // Logging handle
+    stream: TcpStream,
+    addr: SocketAddr,
+    clients: &ClientList,
+    peers: &PeerList,
+    shutdown_tx: &broadcast::Sender<()>,
+    backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    connection_count: Arc<std::sync::atomic::AtomicUsize>,
+    config: &ServerConfig,
+    logger: &Logger,
+) {
+    // Check if the incoming connection's IP matches a configured peer IP.
+    let is_peer = config
+        .peer_addresses
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .any(|peer_addr_str| peer_addr_str.starts_with(&addr.ip().to_string()));
+
+    if is_peer {
+        // This is an incoming connection from another peer server.
+        handle_new_peer_connection(
+            stream,
+            addr,
+            peers,
+            clients,
+            shutdown_tx.subscribe(),
+            logger.clone(),
+        )
+        .await;
+    } else {
+        // This is a regular client connection.
+        handle_new_client_connection(
+            stream,
+            addr,
+            clients,
+            peers,
+            shutdown_tx,
+            backpressure_tx,
+            quarantine_list,
+            connection_count,
+            config,
+            logger,
+        )
+        .await;
+    }
+}
+
+/// Validates a new client TCP connection and then spawns its session task
+async fn handle_new_client_connection(
+    stream: TcpStream,
+    addr: SocketAddr,
+    clients: &ClientList,
+    peers: &PeerList,
+    shutdown_tx: &broadcast::Sender<()>,
+    backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    connection_count: Arc<std::sync::atomic::AtomicUsize>,
+    config: &ServerConfig,
+    logger: &Logger,
 ) {
     // 1) Reject any client still in quarantine
     {
         let q = quarantine_list.lock().await;
         if q.is_quarantined(&addr) {
             logger.info(&format!("🔒 Client {} is quarantined — ignoring connection", addr));
-            return;  // Drop the stream by returning early
+            return;
         }
     }
 
     // 2) Prevent duplicate connections from the same address
     {
-        let list = clients.read().await;  // Read-lock while checking
+        let list = clients.read().await;
         if list.iter().any(|c| c.addr == addr) {
             logger.warn(&format!("Duplicate connection from {} rejected", addr));
             return;
         }
     }
 
-    // 3) Disable Nagle's algorithm to reduce latency (small packets go out immediately)
+    // 3) Disable Nagle's algorithm to reduce latency
     if let Err(e) = stream.set_nodelay(true) {
         logger.warn(&format!("⚠️  Failed to set TCP_NODELAY for {}: {}", addr, e));
     }
 
-    // 4) Split the stream into read/write halves for independent tasks
+    // 4) Split the stream and create a control channel
     let (reader_half, writer_half) = stream.into_split();
-
-    // 5) Create a dedicated control channel for backpressure commands to this client
     let (control_tx, control_rx) = mpsc::channel(config.control_channel_capacity);
 
-    // 6) Build our Client struct, wrapping the writer in Arc<Mutex> for safe sharing
+    // 5) Build our Client struct
     let client = Client {
         addr,
         writer: Arc::new(Mutex::new(writer_half)),
         control_tx,
     };
 
-    // 7) Register the client in the global list under a write-lock
+    // 6) Register the client in the global list
     {
         let mut list = clients.write().await;
         list.push(client.clone());
     }
 
-    // 8) Increment and log the connection count
+    // 7) Increment and log the connection count
     let current = connection_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     logger.info(&format!("🔌 {} connected. Active connections: {}", addr, current));
 
-    // 9) Clone everything needed into the async task
+    // 8) Clone everything needed for the async task
     let clients_for_task    = clients.clone();
+    let peers_for_task      = peers.clone();
     let logger              = logger.clone();
     let config              = config.clone();
     let mut shutdown_rx     = shutdown_tx.subscribe();
@@ -379,14 +454,13 @@ async fn handle_new_connection(
     let client_timeout      = config.client_timeout;
     let rate_limit          = config.rate_limit;
 
-    // 10) Spawn the per-client session loop
-    // Spawn the per-client session loop and log teardown cleanly
+    // 9) Spawn the per-client session loop
     tokio::spawn(async move {
-        // Run the client message loop
-        if let Err(e) = handle_connection(
+        if let Err(e) = handle_client_connection(
             reader_half,
             client.clone(),
             clients_for_task,
+            peers_for_task,
             &mut shutdown_rx,
             &backpressure_tx,
             client_timeout,
@@ -400,22 +474,18 @@ async fn handle_new_connection(
             logger.warn(&format!("⚠️ Error with {}: {}", addr, e));
         }
 
-        // Decrement the counter and log how many remain
         let remaining = connection_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
         logger.info(&format!("🔌 {} disconnected. Active connections: {}", addr, remaining));
     });
 
 }
 
-/// Manages a single client's session:
-/// - Reads incoming lines and applies rate limiting
-/// - Reports backpressure without blocking
-/// - Enforces inactivity timeouts and graceful shutdown
-/// - On exit, removes the client from the shared list and logs the remaining count
-async fn handle_connection(
+/// Manages a single client's session, reading lines and broadcasting them.
+async fn handle_client_connection(
     reader_half: tokio::net::tcp::OwnedReadHalf,
     client: Client,
     clients: ClientList,
+    peers: PeerList, // <-- New: needed for broadcasting
     shutdown_rx: &mut broadcast::Receiver<()>,
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
     client_timeout: Option<Duration>,
@@ -424,17 +494,15 @@ async fn handle_connection(
     config: &ServerConfig,
     logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Wrap the read half for line-based async I/O
     let mut reader = BufReader::new(reader_half).lines();
-
-    // Per-client rate limiter
     let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(rate_limit)));
 
-    // Run the central message loop (handles lines, flow-control, timeout, shutdown)
+    // The message loop now gets the peer list to broadcast to.
     if let Err(e) = handle_client_messages(
         &mut reader,
         &client,
         &clients,
+        &peers, // <-- New
         shutdown_rx,
         backpressure_tx,
         client_timeout,
@@ -445,82 +513,54 @@ async fn handle_connection(
     )
     .await
     {
-        // Log any unexpected error during the session
         logger.warn(&format!("⚠️ Error in client {} session: {}", client.addr, e));
     }
 
-    // Remove this client from the active list and compute how many remain
-    let remaining = {
+    // Cleanup: remove this client from the active list
+    {
         let mut list = clients.write().await;
         list.retain(|c| c.addr != client.addr);
-        list.len()
-    };
-
-    // Log the cleanup with the updated count
-    logger.info(&format!(
-        "🧼 Client {} removed; {} clients remain",
-        client.addr, remaining
-    ));
-
+    }
+    logger.info(&format!("🧼 Client {} removed.", client.addr));
     Ok(())
 }
 
 
 /// === MESSAGES ===
 
-/// Manages a single client session until disconnect or shutdown:
-/// - Reads incoming lines and applies rate limiting & backpressure reporting  
-/// - Responds to throttle and flow-control commands  
-/// - Enforces inactivity timeouts  
-/// - Sends a shutdown notice on server exit  
+/// Manages a single client session until disconnect or shutdown.
 async fn handle_client_messages(
-    // Line-based reader for this client's incoming data
     reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
-    // Metadata and writer handle for this client
     sender: &Client,
-    // Shared list of all clients, used for broadcasting
     clients: &ClientList,
-    // Receiver for the server's global shutdown signal
+    peers: &PeerList,
     shutdown_rx: &mut broadcast::Receiver<()>,
-    // Channel to report our outgoing-queue length for backpressure
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
-    // How long before we drop an idle client
     timeout: Option<Duration>,
-    // Per-client rate limiter
     rate_limiter: Arc<Mutex<RateLimiter>>,
-    // All config settings
     config: &ServerConfig,
-    // Logger for recording events
     logger: &Logger,
-    // Receiver for throttle/flow-control commands targeted at this client
     mut control_rx: mpsc::Receiver<ClientCommand>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Channel for staging our queue-size reports
     let (queue_tx, mut queue_rx) = mpsc::channel::<usize>(config.queue_monitor_capacity);
-
-    // Track when the client last sent anything
     let mut last_active = Instant::now();
-
-    // Timer that fires every `timeout_check_interval_secs` to enforce inactivity
     let mut timeout_interval = time::interval(Duration::from_secs(
         config.timeout_check_interval_secs,
     ));
 
-    // Main loop: handle whichever event happens first
     loop {
         tokio::select! {
             // 1) Incoming line from client
             maybe_line = reader.next_line() => {
-                // Update last-active timestamp immediately
                 last_active = Instant::now();
-
                 match maybe_line {
                     Ok(Some(line)) => {
-                        // A full line arrived: process rate-limit, logging, broadcast
+                        // Process the line and broadcast to clients AND peers
                         process_client_line(
                             line,
                             sender,
                             clients,
+                            peers, // <-- New
                             &rate_limiter,
                             queue_tx.clone(),
                             config,
@@ -528,12 +568,10 @@ async fn handle_client_messages(
                         ).await;
                     }
                     Ok(None) => {
-                        // EOF: client closed connection cleanly
                         logger.info(&format!("⚠️ {} disconnected gracefully.", sender.addr));
                         break;
                     }
                     Err(e) => {
-                        // I/O error reading from socket
                         logger.warn(&format!("❌ Error reading from {}: {}", sender.addr, e));
                         break;
                     }
@@ -542,24 +580,17 @@ async fn handle_client_messages(
 
             // 2) Throttle or flow-control command arrived
             Some(cmd) = control_rx.recv() => {
-                // Pause message handling as requested
                 apply_client_command(cmd, sender, config, logger).await;
             }
 
-            // 3) It's time to report our queue size for backpressure
+            // 3) Report our queue size for backpressure
             Some(queue_size) = queue_rx.recv() => {
-                // Clone what we need into a small async task to avoid blocking
                 let addr = sender.addr;
                 let tx = backpressure_tx.clone();
                 let log = logger.clone();
-
                 tokio::spawn(async move {
                     if let Err(e) = tx.try_send((addr, queue_size)) {
-                        // If the channel is full, warn and drop the report
-                        log.warn(&format!(
-                            "⚠️ Backpressure channel full for {}: {}",
-                            addr, e
-                        ));
+                        log.warn(&format!("⚠️ Backpressure channel full for {}: {}", addr, e));
                     }
                 });
             }
@@ -568,41 +599,27 @@ async fn handle_client_messages(
             _ = timeout_interval.tick() => {
                 if let Some(timeout) = timeout {
                     if last_active.elapsed() > timeout {
-                        // Send a warning to the client then break
-                        logger.info(&format!(
-                            "⏰ Client {} timed out after {:?} of inactivity",
-                            sender.addr, timeout
-                        ));
+                        logger.info(&format!("⏰ Client {} timed out", sender.addr));
                         let mut w = sender.writer.lock().await;
-                        let _ = w
-                            .write_all(b"Warning: You have been disconnected due to inactivity.\n")
-                            .await;
+                        let _ = w.write_all(b"Warning: Disconnected due to inactivity.\n").await;
                         break;
                     }
                 }
             }
 
-            // 5) Global shutdown signal from the server
+            // 5) Global shutdown signal
             _ = shutdown_rx.recv() => {
-                // Notify client and exit
                 logger.warn(&format!("🛑 {} disconnected due to shutdown.", sender.addr));
                 let mut w = sender.writer.lock().await;
-                let _ = w
-                    .write_all(b"Warning: Server is shutting down.\n")
-                    .await;
+                let _ = w.write_all(b"Warning: Server is shutting down.\n").await;
                 break;
             }
         }
     }
-
     Ok(())
 }
 
 /// Responds to a throttle or flow-control command by pausing the client's processing
-///
-/// # Behavior
-/// - `Throttle`: wait `throttle_delay_ms` before handling the next message  
-/// - `FlowControl`: wait `flow_control_delay_ms` before continuing reads  
 async fn apply_client_command(
     cmd: ClientCommand,
     sender: &Client,
@@ -612,7 +629,6 @@ async fn apply_client_command(
     match cmd {
         ClientCommand::Throttle => {
             logger.info(&format!("⏳ Throttling {}", sender.addr));
-            // Sleep here yields the task, letting other clients proceed
             tokio::time::sleep(Duration::from_millis(config.throttle_delay_ms)).await;
         }
         ClientCommand::FlowControl => {
@@ -622,146 +638,250 @@ async fn apply_client_command(
     }
 }
 
-/// Processes a single client message:
-/// - Enforces per-client rate limiting
-/// - Logs the message with optional privacy filtering
-/// - Broadcasts the original message to all other clients
-///
-/// # Parameters
-/// - `line`: raw input from the client (may include a trailing newline)
-/// - `sender`: the client who sent this message
-/// - `clients`: the list of active clients for broadcasting
-/// - `rate_limiter`: per-client rate limiter guard
-/// - `queue_tx`: channel to report broadcast queue size
-/// - `config`: server configuration (including logger settings)
-/// - `logger`: global logger instance
+/// Processes a single client message and broadcasts to clients AND peers.
 async fn process_client_line(
     line: String,
     sender: &Client,
     clients: &ClientList,
+    peers: &PeerList, // <-- New
     rate_limiter: &Arc<Mutex<RateLimiter>>,
     queue_tx: mpsc::Sender<usize>,
     config: &ServerConfig,
     logger: &Logger,
 ) {
-    // 1) Rate limit: reset & check in one call
-    let within_limit = rate_limiter.lock().await.check_limit();
-    if !within_limit {
-        // Notify the client they're sending too fast, then skip broadcasting
+    if !rate_limiter.lock().await.check_limit() {
         let mut w = sender.writer.lock().await;
-        let _ = w
-            .write_all(b"Warning: You are sending messages too quickly. Please slow down.\n")
-            .await;
+        let _ = w.write_all(b"Warning: Sending messages too quickly.\n").await;
         return;
     }
 
-    // 2) Build the envelope (full fidelity)
     let content = remove_last_newline(&line);
     let envelope = json!({
-        "remote_addr": sender.addr,
+        "remote_addr": sender.addr.to_string(),
         "content": content,
     });
     let envelope_text = envelope.to_string();
 
-    // 3) Parse the client's content *once*
     let json_content: JsonValue = serde_json::from_str(&content).unwrap_or(JsonValue::String(content.to_string()));
-
-    // 4) Move it into pruning or keep it as-is
     let pruned_content = if config.logger.log_keys.is_some() {
-        // Takes ownership—no clone!
         prune_content_value(json_content, &config.logger.log_keys)
     } else {
         json_content
     };
 
-    // 5) Render the log line
     let log_body = if config.logger.enable_json_log {
-        // JSON mode: re-envelope & serialize
-        json!({
-            "remote_addr": sender.addr,
-            "content": pruned_content,
-        })
-        .to_string()
+        json!({"remote_addr": sender.addr, "content": pruned_content}).to_string()
     } else {
-        // Plain mode: arrow + the pruned JSON
         format!("📨 From {}: {}", sender.addr, pruned_content)
     };
-
-    // 6) Emit one log call
     logger.info(&log_body);
 
-    // 7) Send the un-filtered payload on to clients
-    broadcast_message(clients, sender, &envelope_text, queue_tx, logger).await;
+    // **BROADCAST TO BOTH PEERS AND CLIENTS**
+    let msg_bytes = Arc::new(Bytes::from(ensure_trailing_newline(&envelope_text).into_owned()));
+
+    // Report queue size based on number of clients + peers
+    let client_count = clients.read().await.len().saturating_sub(1);
+    let peer_count = peers.read().await.len();
+    let _ = queue_tx.try_send(client_count + peer_count);
+
+    // Send to other clients
+    broadcast_to_clients(clients, msg_bytes.clone(), logger, Some(sender.addr)).await;
+
+    // Send to all peers
+    broadcast_to_peers(peers, msg_bytes, logger).await;
 }
 
 /// Removes the last `\n` from the string if present.
-/// Returns a slice into `s` without allocating.
-///
-/// # Why
-/// - We don't want double newlines when logging or embedding content.
-/// - Using `strip_suffix` avoids allocations when there's nothing to trim.
 fn remove_last_newline(s: &str) -> &str {
     s.strip_suffix('\n').unwrap_or(s)
 }
 
-/// Sends `msg` to every client except the sender, reporting queue size for backpressure:
-async fn broadcast_message(
-    clients: &ClientList,               // Shared list of all connected clients
-    sender: &Client,                    // The client who sent the original message
-    msg: &str,                          // The text payload to broadcast
-    queue_tx: mpsc::Sender<usize>,      // Channel to report current broadcast queue size
-    logger: &Logger,                    // Logger for warning on send failures
+/// Ensures the string ends with exactly one newline (`\n`).
+fn ensure_trailing_newline(s: &str) -> Cow<'_, str> {
+    if s.ends_with('\n') {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(format!("{s}\n"))
+    }
+}
+
+// =========================================================================
+// == PEER-SPECIFIC LOGIC ==================================================
+// =========================================================================
+
+/// Spawns a task that perpetually tries to connect to a single peer.
+fn spawn_peer_connector(
+    peer_addr: String,
+    peers: PeerList,
+    clients: ClientList,
+    mut shutdown_rx: broadcast::Receiver<()>,
+    logger: Logger,
 ) {
-    // 1) Take a quick snapshot of all other clients under a read lock.
-    //    This lock is held only long enough to clone the necessary Client structs.
-    let snapshot: Vec<Client> = {
-        let guard = clients.read().await;
-        guard
-            .iter()
-            .filter(|c| c.addr != sender.addr)  // Exclude the original sender
-            .cloned()                           // Clone the Arc handles cheaply
-            .collect()                         // Collect into a Vec for iteration
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    logger.info(&format!("Peer connector for {} shutting down.", peer_addr));
+                    break;
+                },
+                connect_result = TcpStream::connect(&peer_addr) => {
+                    match connect_result {
+                        Ok(stream) => {
+                            logger.info(&format!("🤝 Connected TO peer: {}", peer_addr));
+                            let remote_addr = stream.peer_addr().ok();
+                            if let Err(e) = stream.set_nodelay(true) {
+                                logger.warn(&format!("Failed to set TCP_NODELAY for peer {}: {}", peer_addr, e));
+                            }
+                            let (reader, writer) = stream.into_split();
+
+                            let peer = Peer {
+                                addr: peer_addr.clone(),
+                                writer: Arc::new(Mutex::new(writer)),
+                            };
+                            peers.write().await.push(peer);
+
+                            // This task now handles messages *from* the peer we connected to.
+                            handle_peer_messages(
+                                reader,
+                                remote_addr,
+                                &peer_addr,
+                                &clients,
+                                &mut shutdown_rx,
+                                &logger,
+                            ).await;
+
+                            // If the handler returns, the peer disconnected. Remove it.
+                            peers.write().await.retain(|p| p.addr != peer_addr);
+                            logger.warn(&format!("Peer {} disconnected. Will attempt to reconnect.", peer_addr));
+                        }
+                        Err(_) => {
+                            // Suppress noisy logs: logger.warn(&format!("Failed to connect to peer {}: {}. Retrying...", peer_addr, e));
+                        }
+                    }
+                }
+            }
+            // Wait before retrying connection
+            time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+}
+
+/// Registers an incoming connection from a peer and spawns its message loop.
+async fn handle_new_peer_connection(
+    stream: TcpStream,
+    addr: SocketAddr,
+    peers: &PeerList,
+    clients: &ClientList,
+    mut shutdown_rx: broadcast::Receiver<()>,
+    logger: Logger,
+) {
+    let peer_addr_str = addr.to_string();
+    logger.info(&format!("🤝 Accepted connection FROM peer: {}", peer_addr_str));
+
+    if let Err(e) = stream.set_nodelay(true) {
+        logger.warn(&format!("Failed to set TCP_NODELAY for peer {}: {}", addr, e));
+    }
+    let (reader, writer) = stream.into_split();
+    
+    let peer = Peer {
+        addr: peer_addr_str.clone(),
+        writer: Arc::new(Mutex::new(writer)),
     };
+    peers.write().await.push(peer);
 
-    // 2) Report how many clients we're about to send to.
-    //    Using try_send ensures we never block; if the channel is full, we drop the report.
-    let _ = queue_tx.try_send(snapshot.len());
+    // This task handles messages *from* the peer that connected to us.
+    handle_peer_messages(
+        reader,
+        Some(addr),
+        &peer_addr_str,
+        clients,
+        &mut shutdown_rx,
+        &logger,
+    ).await;
 
-    // 3) Build the message bytes once, with a guaranteed trailing newline.
-    //    Wrapping in Arc<Bytes> makes cloning zero-copy for each task.
-    let msg_bytes = Arc::new(Bytes::from(ensure_trailing_newline(msg).into_owned()));
+    // If the handler returns, the peer disconnected. Remove it.
+    peers.write().await.retain(|p| p.addr != peer_addr_str);
+    logger.warn(&format!("Peer {} disconnected.", peer_addr_str));
+}
 
-    // 4) For each client in our snapshot, spawn a small task to write asynchronously.
-    //    This way, a slow or stalled client can't hold up the others.
+/// Reads messages from a single peer and broadcasts them ONLY to local clients.
+async fn handle_peer_messages(
+    reader: tokio::net::tcp::OwnedReadHalf,
+    remote_addr: Option<SocketAddr>,
+    peer_addr_str: &str,
+    clients: &ClientList,
+    shutdown_rx: &mut broadcast::Receiver<()>,
+    logger: &Logger,
+) {
+    let mut reader = BufReader::new(reader).lines();
+    loop {
+        tokio::select! {
+            maybe_line = reader.next_line() => {
+                match maybe_line {
+                    Ok(Some(line)) => {
+                        // The line from a peer is already a full JSON envelope.
+                        // We do NOT re-wrap or log it. We just forward it.
+                        let msg_bytes = Arc::new(Bytes::from(ensure_trailing_newline(&line).into_owned()));
+                        broadcast_to_clients(clients, msg_bytes, logger, None).await;
+                    }
+                    Ok(None) | Err(_) => {
+                        // Peer disconnected.
+                        break;
+                    }
+                }
+            }
+            _ = shutdown_rx.recv() => {
+                break;
+            }
+        }
+    }
+}
+
+/// Sends a message to all connected clients, optionally excluding one.
+async fn broadcast_to_clients(
+    clients: &ClientList,
+    msg_bytes: Arc<Bytes>,
+    logger: &Logger,
+    exclude_addr: Option<SocketAddr>,
+) {
+    let snapshot: Vec<_> = clients
+        .read()
+        .await
+        .iter()
+        .filter(|c| exclude_addr.map_or(true, |addr| c.addr != addr))
+        .cloned()
+        .collect();
+
     for client in snapshot {
-        let writer = client.writer.clone();  // Clone Arc<Mutex<...>> handle
-        let buf = msg_bytes.clone();         // Clone Arc<Bytes> pointer
-        let addr = client.addr;              // Capture address for logging
-        let log = logger.clone();            // Clone logger handle
+        let writer = client.writer.clone();
+        let buf = msg_bytes.clone();
+        let addr = client.addr;
+        let log = logger.clone();
 
         tokio::spawn(async move {
-            // Lock this client's writer just long enough to send the bytes
             let mut w = writer.lock().await;
             if let Err(e) = w.write_all(&buf).await {
-                // Warn if we can't send (client may have disconnected)
                 log.warn(&format!("❌ Failed to send to client {}: {}", addr, e));
             }
         });
     }
 }
 
-/// Ensures the string ends with exactly one newline (`\n`).
-/// Returns a `Cow<str>` so we only allocate when needed.
-///
-/// # Why
-/// - When we broadcast messages, downstream writers expect each payload to end in `\n`.
-/// - `Cow` lets us borrow `s` unchanged if it already ends with `\n`, saving allocations.
-fn ensure_trailing_newline(s: &str) -> Cow<'_, str> {
-    if s.ends_with('\n') {
-        // Already has a newline: borrow the original string
-        Cow::Borrowed(s)
-    } else {
-        // Add a newline, allocating a new `String`
-        Cow::Owned(format!("{s}\n"))
+/// Sends a message to all connected peers.
+async fn broadcast_to_peers(peers: &PeerList, msg_bytes: Arc<Bytes>, logger: &Logger) {
+    let snapshot: Vec<_> = peers.read().await.iter().cloned().collect();
+
+    for peer in snapshot {
+        let writer = peer.writer.clone();
+        let buf = msg_bytes.clone();
+        let addr = peer.addr.clone();
+        let log = logger.clone();
+
+        tokio::spawn(async move {
+            let mut w = writer.lock().await;
+            if let Err(e) = w.write_all(&buf).await {
+                log.warn(&format!("❌ Failed to send to peer {}: {}", addr, e));
+            }
+        });
     }
 }
