@@ -112,7 +112,7 @@ def test_collect_activations_simple_case():
     # Setup flow and parsed route for "A --> B"
     flow = Flow().activate()
     flow.add_arrow_style("-", ("[", "]"), ",", ">")
-    flow.ready()
+    flow.compile_arrow_patterns()
     pr = flow.parse_route("A --> B")
     # Fake receiver function
     async def fn(msg):

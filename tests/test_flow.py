@@ -23,7 +23,7 @@ def make_flow():
     flow.activate()
     flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
     flow.add_arrow_style(stem="=", brackets=("{", "}"), separator=";", tip=")")
-    flow.ready()
+    flow.compile_arrow_patterns()
     return flow
 
 

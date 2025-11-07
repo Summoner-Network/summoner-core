@@ -43,7 +43,7 @@ print(type(Action.MOVE),
 
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
 flow.add_arrow_style(stem="=", brackets=("{", "}"), separator=";", tip=")")
-flow.ready()
+flow.compile_arrow_patterns()
 print(flow.arrows)
 tests = [
     "/all",

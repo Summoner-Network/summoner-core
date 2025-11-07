@@ -22,7 +22,7 @@ flow.activate() #in use
 Trigger = flow.triggers()
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
 flow.add_arrow_style(stem="=", brackets=("{", "}"), separator=";", tip=")")
-flow.ready() # regex
+flow.compile_arrow_patterns() # regex
 
 # List of available Action classes
 ACTIONS = [Move, Stay, Test]
