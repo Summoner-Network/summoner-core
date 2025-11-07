@@ -13,7 +13,6 @@ agent = SummonerClient(name="QuestionSpell")
 
 flow = agent.flow().activate()
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
-flow.ready()
 
 Trigger = flow.triggers()
 
