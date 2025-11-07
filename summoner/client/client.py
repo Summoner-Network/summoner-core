@@ -184,7 +184,7 @@ class SummonerClient:
             self.logger.warning(f"queue_maxsize < concurrency_limit; back-pressure will throttle producers at {self.send_queue_maxsize}")
 
     def initialize(self):
-        self._flow.ready()
+        self._flow.compile_arrow_patterns()
 
     def flow(self) -> Flow:
         return self._flow

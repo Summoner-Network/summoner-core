@@ -2,6 +2,8 @@ import re
 from typing import Optional, Any, Pattern
 from .triggers import load_triggers
 from .process import Node, ArrowStyle, ParsedRoute
+from typing_extensions import deprecated
+import warnings
 
 # variable names or commands used in flow transitions
 _TOKEN_RE = re.compile(r"""
@@ -216,7 +218,23 @@ class Flow:
             style=None
     )
 
+    def compile_arrow_patterns(self):
+        """
+        Compile (or recompile) regex patterns from the current arrow styles.
+        Safe to call multiple times; no effect if already compiled.
+        """
+        if self.in_use:
+            self._prepare_regex()
+
+    @deprecated("Flow.ready() is deprecated. Use Flow.compile_arrow_patterns() instead. "
+                "When using SummonerClient, patterns are compiled automatically during registration.")
     def ready(self):
+        warnings.warn(
+            "Flow.ready() is deprecated; use Flow.compile_arrow_patterns() instead. "
+            "In SummonerClient, you generally don't need to call this.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         if self.in_use:
             self._prepare_regex()
 
