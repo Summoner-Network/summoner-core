@@ -36,7 +36,6 @@ agent = SummonerClient(name=f"SellerAgent-{my_id}")
 flow = agent.flow().activate()
 
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
-flow.ready()
 
 Trigger = flow.triggers()
 

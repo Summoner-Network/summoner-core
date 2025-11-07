@@ -284,7 +284,7 @@ class ParsedRoute:
         Given an event of type Action.*, return the Nodes
         that this route “activates” (i.e. should be added to the tape).
         """
-        if not self.is_arrow:
+        if isinstance(event, Event) and event is not None and not self.is_arrow:
             # standalone → only the source nodes
             return self.source
 

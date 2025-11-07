@@ -11,7 +11,6 @@ state = "spell"
 
 flow = agent.flow().activate()
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
-flow.ready()
 
 @agent.upload_states()
 async def upload(msg):
