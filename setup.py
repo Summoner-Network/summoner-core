@@ -9,7 +9,8 @@ setup(
     packages=find_packages(include=["summoner", "summoner.*"]),
     install_requires=[
         "aioconsole==0.8.1",
-        "python-dotenv==1.1.0"
+        "python-dotenv==1.1.0",
+        "typing_extensions==4.15.0"
     ],
     extras_require={
         "dev": [
