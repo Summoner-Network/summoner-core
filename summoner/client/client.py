@@ -453,7 +453,7 @@ class SummonerClient:
                     fn,
                     decorator_name="@send[multi=True]",
                     allow_param=(),   # no args allowed
-                    allow_return=(type(None), Any, list, list[str], list[dict], list[Union[str, dict]]),
+                    allow_return=(Any, list, list[str], list[dict], list[Union[str, dict]]),
                     logger=self.logger,
                 )
         
