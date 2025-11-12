@@ -1102,7 +1102,7 @@ class SummonerClient:
                 if not self._travel or self._quit:
                     break
 
-    # ==== SERVER LIFE CYCLE ====
+    # ==== CLIENT LIFE CYCLE ====
 
     def shutdown(self):
         self.logger.info("Client is shutting down...")
