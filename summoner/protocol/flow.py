@@ -1,8 +1,9 @@
 import re
-from typing import Optional, Any, Pattern
+from collections.abc import Callable
+from typing import Optional, Any
 from .triggers import load_triggers
 from .process import Node, ArrowStyle, ParsedRoute
-from typing_extensions import deprecated
+from ._deprecation import deprecated
 import warnings
 
 # variable names or commands used in flow transitions
@@ -48,6 +49,7 @@ def get_token_list(input_string: str, separator: str) -> list[str]:
 
     return [part.strip() for part in split_parts if part.strip()]
 
+Unpack = Callable[[re.Match[str]], tuple[str, str, str]]
 
 class Flow:
     
@@ -57,7 +59,7 @@ class Flow:
         self.arrows: set[ArrowStyle] = set()
         
         self._regex_ready: bool = False
-        self._regex_patterns: list[tuple[Pattern, ArrowStyle, str]] = []
+        self._regex_patterns: list[tuple[re.Pattern[str], ArrowStyle, Unpack]] = []
     
     def activate(self):
         self.in_use = True
@@ -93,7 +95,7 @@ class Flow:
         else:
             return load_triggers(json_dict=json_dict)
 
-    def _build_labeled_complete(self, base, left_bracket, right_bracket, tip) -> Pattern:
+    def _build_labeled_complete(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -104,7 +106,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_complete(self, base, tip) -> Pattern:
+    def _build_unlabeled_complete(self, base, tip) -> re.Pattern[str]:
         arrow  = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -113,7 +115,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
     
-    def _build_labeled_dangling_right(self, base, left_bracket, right_bracket, tip) -> Pattern:
+    def _build_labeled_dangling_right(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -123,7 +125,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_dangling_right(self, base, tip) -> Pattern:
+    def _build_unlabeled_dangling_right(self, base, tip) -> re.Pattern[str]:
         arrow  = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -131,7 +133,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
     
-    def _build_labeled_dangling_left(self, base, left_bracket, right_bracket, tip) -> Pattern:
+    def _build_labeled_dangling_left(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -142,7 +144,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_dangling_left(self, base, tip) -> Pattern:
+    def _build_unlabeled_dangling_left(self, base, tip) -> re.Pattern[str]:
         arrow = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -152,22 +154,22 @@ class Flow:
         return re.compile(regex, re.VERBOSE)
 
 
-    def _unpack_labeled_complete(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_labeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return matched_pattern.group("source"), matched_pattern.group("label"), matched_pattern.group("target")
 
-    def _unpack_unlabeled_complete(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_unlabeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return matched_pattern.group("source"), "", matched_pattern.group("target")
     
-    def _unpack_labeled_dangling_right(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_labeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return matched_pattern.group("source"), matched_pattern.group("label"), ""
     
-    def _unpack_unlabeled_dangling_right(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_unlabeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return matched_pattern.group("source"), "", ""
     
-    def _unpack_labeled_dangling_left(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_labeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return "", matched_pattern.group("label"), matched_pattern.group("target")
 
-    def _unpack_unlabeled_dangling_left(self, matched_pattern: re.Match) -> tuple[str,str,str]:
+    def _unpack_unlabeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
         return "", "", matched_pattern.group("target")
 
     def _prepare_regex(self):
