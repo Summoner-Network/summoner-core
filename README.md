@@ -72,13 +72,14 @@ Once Python and Rust are installed, clone the repo and initialize the environmen
 ```bash
 git clone https://github.com/Summoner-Network/summoner-core.git
 cd summoner-core
-source setup.sh # optional flags: [--uv] [--server <prefix>] (see below)
+source setup.sh # optional flags: [--uv] [--server <prefix>] [--venv <path>] (see below)
 ```
 
 Optional flags for `source setup.sh`:
 
 * `--uv` uses `uv` instead of `pip` and requires `uv` on `PATH`.
 * `--server <prefix>` selects which Rust servers to (re)install by prefix. The prefix is appended to `rust_server_`. Any crate starting with `rust_server_<prefix>` will be installed. Default prefix is `v1_0_0`.
+* `--venv <path>` selects which virtual environment to use. This lets you use `venv/`, `.venv/`, or any custom name. If omitted, the default is `venv/` unless you already activated a venv (in which case the active `$VIRTUAL_ENV` is used).
 
 Examples:
 
@@ -86,13 +87,21 @@ Examples:
 source setup.sh --uv
 source setup.sh --server v1_        # installs all rust_server_v1_* crates if present
 source setup.sh --uv --server v1_1_0 # installs rust_server_v1_1_0 only
+
+# Flexible venv naming
+python3 -m venv .venv
+source .venv/bin/activate
+source setup.sh --uv                # uses the active venv via $VIRTUAL_ENV
+
+# Or explicitly select a venv path (no need to pre-activate)
+source setup.sh --venv .venv --uv
 ```
 
 The `setup.sh` script performs the following actions:
 
 **Python environment**
 
-* Creates and activates a Python virtual environment at `venv/`.
+* Creates and activates a Python virtual environment (default: `venv/`).
 * Installs core Python build tooling: `setuptools`, `wheel`, `maturin`.
 * Uses `pip` by default, or `uv` when `--uv` is set.
 
