@@ -77,13 +77,27 @@ and initialize the project environment by running:
 source setup.sh
 ```
 
+Optional flags:
+
+- `--uv` (use `uv` instead of `pip`; requires `uv` on `PATH`)
+- `--server <prefix>` (select Rust servers by version/prefix; default: `v1_0_0`)
+  - The value is appended to `rust_server_`
+  - Any Rust server crate starting with `rust_server_<prefix>` will be installed (prefix match)
+
+Examples:
+```bash
+source setup.sh --uv
+source setup.sh --server v1_        # installs rust_server_v1_0_0, rust_server_v1_1_0, ... if present
+source setup.sh --uv --server v1_1_0 # installs rust_server_v1_1_0 only (exact-prefix match)
+```
+
 This script performs the following actions:
 
-- Creates a **Python virtual environment** in the root directory (`venv`)
-- Installs required **Python packages** listed in `requirements.txt`
-- Generates a default **`.env`** file with configuration placeholders
-- Installs all available **Rust server implementations**, using `Cargo.lock` to ensure consistent builds
-- Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
+* Creates a **Python virtual environment** in the root directory (`venv`) and activates it
+* Installs core Python build tooling (`setuptools`, `wheel`, `maturin`) using `pip` (or `uv` if `--uv`)
+* Generates a default **`.env`** file with configuration placeholders
+* Reinstalls Rust servers matching the selected prefix (default `v1_0_0`, override with `--server <prefix>`) by calling `reinstall_python_sdk.sh` (which calls `reinstall_rust_server.sh`)
+* Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
 
 
 ### 4. Configure Environment Variables

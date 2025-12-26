@@ -49,6 +49,7 @@ from summoner.protocol.validation import (
 from summoner.protocol.payload import (
     wrap_with_types, 
     recover_with_types,
+    RelayedMessage
 )
 
 class ServerDisconnected(Exception):
@@ -667,12 +668,7 @@ class SummonerClient:
                     # if not data:
                     #     raise ServerDisconnected("Server closed the connection.")
 
-                    # text = data.decode()
-                    # try:
-                    #     payload = fully_recover_json(text)
-                    # except (ValueError, JSONDecodeError):
-                    #     payload = remove_last_newline(text)
-                    payload = recover_with_types(data.decode())
+                    payload: RelayedMessage = recover_with_types(data.decode())
 
                     # ----[ Build: Validation ]----
                     async with self.hooks_lock:

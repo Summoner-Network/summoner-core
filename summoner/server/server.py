@@ -23,8 +23,9 @@ from summoner.utils import format_addr
 
 if platform.system() != "Windows":
     
+    rust_server_v1_0_0  = importlib.import_module("rust_server_v1_0_0")
     # rust_server is always associated with the latest version
-    rust_server = importlib.import_module("rust_server_v1_0_0")
+    rust_server         = importlib.import_module("rust_server_v1_1_0")
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -162,6 +163,22 @@ class SummonerServer:
             
             rust_dispatch = {
 
+                "rust_v1.0.0": lambda h, p : rust_server_v1_0_0.start_tokio_server(
+                    self.name, 
+                    {
+                    "host": server_config.get("host") or h, 
+                    "port": server_config.get("port") or p,
+                    "logger": server_config.get("logger", {}),
+                    **server_config.get("hyper_parameters", {})
+                    }),
+                "rust_v1.1.0": lambda h, p : rust_server.start_tokio_server(
+                    self.name, 
+                    {
+                    "host": server_config.get("host") or h, 
+                    "port": server_config.get("port") or p,
+                    "logger": server_config.get("logger", {}),
+                    **server_config.get("hyper_parameters", {})
+                    }),
                 "rust": lambda h, p : rust_server.start_tokio_server(
                     self.name, 
                     {
