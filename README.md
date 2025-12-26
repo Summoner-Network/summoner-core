@@ -162,7 +162,6 @@ Server starts and listens and client connects and can send messages through a ch
 
 This repository is open source for visibility and usage. External developers are welcome to [open issues](../../issues) to report bugs, suggest improvements, or request new features.
 
-Direct code contributions to this repository are limited to internal team members.
+Direct code contributions to this repository are limited to internal team members. If you want to propose a concrete change, see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the recommended workflow.
 
 If you would like to extend the project, we encourage you to explore our [documentation](https://github.com/Summoner-Network/summoner-docs/) on building modules and to use the [SDK template repository](https://github.com/Summoner-Network/summoner-sdk) as a starting point for creating safe, compatible extensions.
-
