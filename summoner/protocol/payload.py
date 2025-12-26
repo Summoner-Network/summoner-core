@@ -1,6 +1,6 @@
 import json
 from json import JSONDecodeError
-from typing import Any, Tuple, Dict, List, Union
+from typing import Any, Tuple, Dict, List, Union, TypedDict
 
 from summoner.utils import (
     fully_recover_json, 
@@ -191,7 +191,24 @@ def wrap_with_types(
     return ensure_trailing_newline(json.dumps(envelope))
 
 
-def recover_with_types(text: str) -> Union[str, Dict[str, Any]]:
+class RelayedMessage(TypedDict):
+    """
+    Outer transport wrapper added by the relay server for peer-to-peer messages.
+
+    This structure is not authored by the sender. The relay injects `remote_addr`
+    to identify the origin of the message, while `content` carries the original
+    payload as sent by the peer.
+
+    `content` may be:
+      - a raw string (warnings, logs, non-JSON messages), or
+      - a JSON object, optionally a versioned typed envelope
+        (see wrap_with_types / recover_with_types).
+    """
+    remote_addr: str
+    content: Union[str, dict]
+
+
+def recover_with_types(text: str) -> RelayedMessage:
     """
     Recover and validate a typed payload from a server message.
 
