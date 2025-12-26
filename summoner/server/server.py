@@ -21,11 +21,16 @@ from summoner.utils import (
 from summoner.logger import get_logger, configure_logger, Logger
 from summoner.utils import format_addr
 
+rust_server_v1_0_0 = None
+rust_server = None  # alias to "latest"
+
 if platform.system() != "Windows":
-    
-    rust_server_v1_0_0  = importlib.import_module("rust_server_v1_0_0")
-    # rust_server is always associated with the latest version
-    rust_server         = importlib.import_module("rust_server_v1_1_0")
+    try: rust_server_v1_0_0 = importlib.import_module("rust_server_v1_0_0")
+    except ModuleNotFoundError: rust_server_v1_0_0 = None
+
+    # "latest" (your current choice)
+    try: rust_server = importlib.import_module("rust_server_v1_1_0")
+    except ModuleNotFoundError: rust_server = None
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -161,35 +166,33 @@ class SummonerServer:
 
         if platform.system() != "Windows":
             
-            rust_dispatch = {
+            rust_dispatch = {}
 
-                "rust_v1.0.0": lambda h, p : rust_server_v1_0_0.start_tokio_server(
-                    self.name, 
+            if rust_server_v1_0_0 is not None:
+                rust_dispatch["rust_v1.0.0"] = lambda h, p: rust_server_v1_0_0.start_tokio_server(
+                    self.name,
                     {
-                    "host": server_config.get("host") or h, 
-                    "port": server_config.get("port") or p,
-                    "logger": server_config.get("logger", {}),
-                    **server_config.get("hyper_parameters", {})
-                    }),
-                "rust_v1.1.0": lambda h, p : rust_server.start_tokio_server(
-                    self.name, 
-                    {
-                    "host": server_config.get("host") or h, 
-                    "port": server_config.get("port") or p,
-                    "logger": server_config.get("logger", {}),
-                    **server_config.get("hyper_parameters", {})
-                    }),
-                "rust": lambda h, p : rust_server.start_tokio_server(
-                    self.name, 
-                    {
-                    "host": server_config.get("host") or h, 
-                    "port": server_config.get("port") or p,
-                    "logger": server_config.get("logger", {}),
-                    **server_config.get("hyper_parameters", {})
+                        "host": server_config.get("host") or h,
+                        "port": server_config.get("port") or p,
+                        "logger": server_config.get("logger", {}),
+                        **server_config.get("hyper_parameters", {})
                     })
-            }
+
+            if rust_server is not None:
+                rust_dispatch["rust_v1.1.0"] = lambda h, p: rust_server.start_tokio_server(
+                    self.name,
+                    {
+                        "host": server_config.get("host") or h,
+                        "port": server_config.get("port") or p,
+                        "logger": server_config.get("logger", {}),
+                        **server_config.get("hyper_parameters", {})
+                    })
+                rust_dispatch["rust"] = rust_dispatch["rust_v1.1.0"]
 
             option = server_config.get("version", None)
+            if option in ("rust", "rust_v1.1.0")    and rust_server is None:        raise RuntimeError("Rust backend requested (v1.1.0) but rust_server_v1_1_0 is not installed.")
+            if option == "rust_v1.0.0"              and rust_server_v1_0_0 is None: raise RuntimeError("Rust backend requested (v1.0.0) but rust_server_v1_0_0 is not installed.")
+            
             if option in rust_dispatch:
                 try:
                     rust_dispatch[option](host, port)
