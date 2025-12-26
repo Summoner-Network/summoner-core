@@ -21,16 +21,25 @@ from summoner.utils import (
 from summoner.logger import get_logger, configure_logger, Logger
 from summoner.utils import format_addr
 
-rust_server_v1_0_0 = None
-rust_server = None  # alias to "latest"
+# Priority is insertion order: first = preferred ("latest").
+RUST_BACKENDS = {
+    "rust_v1.1.0": "rust_server_v1_1_0",
+    "rust_v1.0.0": "rust_server_v1_0_0",
+    # add more here later...
+}
+
+RUST_MODULES = {}   # key: "rust_v1.1.0" -> imported module
+RUST_LATEST = None  # imported module for "rust" (best available)
 
 if platform.system() != "Windows":
-    try: rust_server_v1_0_0 = importlib.import_module("rust_server_v1_0_0")
-    except ModuleNotFoundError: rust_server_v1_0_0 = None
-
-    # "latest" (your current choice)
-    try: rust_server = importlib.import_module("rust_server_v1_1_0")
-    except ModuleNotFoundError: rust_server = None
+    for key, modname in RUST_BACKENDS.items():
+        try:
+            m = importlib.import_module(modname)
+            RUST_MODULES[key] = m
+            if RUST_LATEST is None:
+                RUST_LATEST = m
+        except ModuleNotFoundError:
+            pass
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
@@ -165,40 +174,40 @@ class SummonerServer:
             raise TypeError(f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
 
         if platform.system() != "Windows":
-            
-            rust_dispatch = {}
-
-            if rust_server_v1_0_0 is not None:
-                rust_dispatch["rust_v1.0.0"] = lambda h, p: rust_server_v1_0_0.start_tokio_server(
-                    self.name,
-                    {
-                        "host": server_config.get("host") or h,
-                        "port": server_config.get("port") or p,
-                        "logger": server_config.get("logger", {}),
-                        **server_config.get("hyper_parameters", {})
-                    })
-
-            if rust_server is not None:
-                rust_dispatch["rust_v1.1.0"] = lambda h, p: rust_server.start_tokio_server(
-                    self.name,
-                    {
-                        "host": server_config.get("host") or h,
-                        "port": server_config.get("port") or p,
-                        "logger": server_config.get("logger", {}),
-                        **server_config.get("hyper_parameters", {})
-                    })
-                rust_dispatch["rust"] = rust_dispatch["rust_v1.1.0"]
-
             option = server_config.get("version", None)
-            if option in ("rust", "rust_v1.1.0")    and rust_server is None:        raise RuntimeError("Rust backend requested (v1.1.0) but rust_server_v1_1_0 is not installed.")
-            if option == "rust_v1.0.0"              and rust_server_v1_0_0 is None: raise RuntimeError("Rust backend requested (v1.0.0) but rust_server_v1_0_0 is not installed.")
-            
-            if option in rust_dispatch:
+
+            def _payload(h, p):
+                return {
+                    "host": server_config.get("host") or h,
+                    "port": server_config.get("port") or p,
+                    "logger": server_config.get("logger", {}),
+                    **server_config.get("hyper_parameters", {}),
+                }
+
+            mod = None
+
+            if option == "rust":
+                mod = RUST_LATEST
+
+            elif option in RUST_MODULES:
+                mod = RUST_MODULES[option]
+
+            elif isinstance(option, str) and option.startswith("rust"):
+                available = ", ".join(["rust"] + list(RUST_MODULES.keys())) if RUST_LATEST else \
+                            ", ".join(RUST_MODULES.keys())
+                raise RuntimeError(
+                    f"Rust backend '{option}' requested but not available. Installed options: {available or '(none)'}"
+                )
+
+            if mod is not None:
                 try:
-                    rust_dispatch[option](host, port)
+                    requested = option if option is not None else "(unset)"
+                    print(f"[DEBUG] Config requested version '{requested}' -> resolved to '{mod.__name__}'")
+                    mod.start_tokio_server(self.name, _payload(host, port))
                 except KeyboardInterrupt:
                     pass
                 return
+
         
         try:
             logger_cfg = server_config.get("logger", {})
