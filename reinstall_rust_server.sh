@@ -9,30 +9,59 @@ THIS_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$THIS_SCRIPT/.." && pwd)"
 
 # ─────────────────────────────────────────────────────────────
-# Parse args: [--dev-core] [<optional-prefix>]
+# Parse args: [--dev-core] [<optional-prefix>] [--venv <path>]
 # ─────────────────────────────────────────────────────────────
 DEV_CORE=false
 PREFIX_FILTER=""
+VENV_OVERRIDE=""
 
 echo "🔍 Raw arguments: $*"
 
+prev=""
 for arg in "$@"; do
   if [[ "$arg" == "--dev-core" ]]; then
     DEV_CORE=true
+  elif [[ "$prev" == "--venv" ]]; then
+    VENV_OVERRIDE="$arg"
+    prev=""
+    continue
+  elif [[ "$arg" == "--venv" ]]; then
+    prev="--venv"
   elif [[ -z "$PREFIX_FILTER" && "$arg" != --* ]]; then
     PREFIX_FILTER="$arg"
   fi
 done
 
-echo "✅ Final values: DEV_CORE=$DEV_CORE, PREFIX_FILTER=$PREFIX_FILTER"
+if [[ "$prev" == "--venv" ]]; then
+  echo "❌ --venv requires a value, e.g. --venv .venv"
+  exit 1
+fi
+
+echo "✅ Final values: DEV_CORE=$DEV_CORE, PREFIX_FILTER=$PREFIX_FILTER, VENV_OVERRIDE=$VENV_OVERRIDE"
 
 # ─────────────────────────────────────────────────────────────
 # Select venv location
 # ─────────────────────────────────────────────────────────────
-if [ "$DEV_CORE" = true ]; then
+if [[ -n "$VENV_OVERRIDE" ]]; then
+  # Align with reinstall_python_sdk.sh:
+  # - absolute path: use as-is
+  # - relative path: resolve relative to ROOT_DIR
+  if [[ "$VENV_OVERRIDE" == /* ]]; then
+    VENV_DIR="$VENV_OVERRIDE"
+  else
+    VENV_DIR="$ROOT_DIR/$VENV_OVERRIDE"
+  fi
+  VENV_DIR="${VENV_DIR%/}"
+elif [ "$DEV_CORE" = true ]; then
   VENV_DIR="$THIS_SCRIPT/venv"
 else
   VENV_DIR="$ROOT_DIR/venv"
+fi
+
+# Guard against empty path
+if [[ -z "${VENV_DIR:-}" ]]; then
+  echo "❌ Resolved VENV_DIR is empty. Check your --venv value."
+  exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -44,6 +73,9 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
   . "$VENV_DIR/bin/activate"
 else
   echo "❌ Virtualenv not found at: $VENV_DIR"
+  echo "   Tips:"
+  echo "     - pass --venv .venv (or your venv path)"
+  echo "     - or create the venv at that location"
   exit 1
 fi
 
@@ -92,7 +124,9 @@ if [ "$FOUND" -eq 0 ]; then
 fi
 
 echo
-if [ "$DEV_CORE" = true ]; then
+if [[ -n "$VENV_OVERRIDE" ]]; then
+  echo "ℹ️  Completed with --venv (venv at $VENV_DIR)"
+elif [ "$DEV_CORE" = true ]; then
   echo "ℹ️  Completed with --dev-core (venv at $THIS_SCRIPT/venv)"
 else
   echo "ℹ️  Completed with default venv (venv at $ROOT_DIR/venv)"
