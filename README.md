@@ -67,37 +67,43 @@ cargo --version     # ✅ Should print the Cargo package manager version
 
 ### 3. Run the Setup Script
 
-Once Python and Rust are installed, `git clone` the default branch, for example by using 
+Once Python and Rust are installed, clone the repo and initialize the environment:
+
 ```bash
 git clone https://github.com/Summoner-Network/summoner-core.git
-```
-and initialize the project environment by running:
-
-```bash
-source setup.sh
+cd summoner-core
+source setup.sh # optional flags: [--uv] [--server <prefix>] (see below)
 ```
 
-Optional flags:
+Optional flags for `source setup.sh`:
 
-- `--uv` (use `uv` instead of `pip`; requires `uv` on `PATH`)
-- `--server <prefix>` (select Rust servers by version/prefix; default: `v1_0_0`)
-  - The value is appended to `rust_server_`
-  - Any Rust server crate starting with `rust_server_<prefix>` will be installed (prefix match)
+* `--uv` uses `uv` instead of `pip` and requires `uv` on `PATH`.
+* `--server <prefix>` selects which Rust servers to (re)install by prefix. The prefix is appended to `rust_server_`. Any crate starting with `rust_server_<prefix>` will be installed. Default prefix is `v1_0_0`.
 
 Examples:
+
 ```bash
 source setup.sh --uv
-source setup.sh --server v1_        # installs rust_server_v1_0_0, rust_server_v1_1_0, ... if present
-source setup.sh --uv --server v1_1_0 # installs rust_server_v1_1_0 only (exact-prefix match)
+source setup.sh --server v1_        # installs all rust_server_v1_* crates if present
+source setup.sh --uv --server v1_1_0 # installs rust_server_v1_1_0 only
 ```
 
-This script performs the following actions:
+The `setup.sh` script performs the following actions:
 
-* Creates a **Python virtual environment** in the root directory (`venv`) and activates it
-* Installs core Python build tooling (`setuptools`, `wheel`, `maturin`) using `pip` (or `uv` if `--uv`)
-* Generates a default **`.env`** file with configuration placeholders
-* Reinstalls Rust servers matching the selected prefix (default `v1_0_0`, override with `--server <prefix>`) by calling `reinstall_python_sdk.sh` (which calls `reinstall_rust_server.sh`)
-* Installs the `summoner` folder as a **Python package** in editable mode, enabling clean imports like `from summoner.server import *` without modifying `PYTHONPATH`
+**Python environment**
+
+* Creates and activates a Python virtual environment at `venv/`.
+* Installs core Python build tooling: `setuptools`, `wheel`, `maturin`.
+* Uses `pip` by default, or `uv` when `--uv` is set.
+
+**Configuration**
+
+* Generates a default `.env` file with configuration placeholders.
+
+**SDK and Rust servers**
+
+* Reinstalls Rust servers matching the selected prefix by calling `reinstall_python_sdk.sh`, which also calls `reinstall_rust_server.sh`.
+* Installs the `summoner` folder as a Python package in editable mode. This enables imports like `from summoner.server import *` without modifying `PYTHONPATH`.
 
 
 ### 4. Configure Environment Variables
