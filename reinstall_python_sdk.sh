@@ -241,10 +241,19 @@ if [ ! -f "$RUST_SCRIPT" ]; then
 fi
 
 if [ "$DEV_CORE" = true ]; then
-  bash "$RUST_SCRIPT" "$PREFIX_FILTER" --dev-core
+  if [[ -n "${VENV_OVERRIDE:-}" ]]; then
+    bash "$RUST_SCRIPT" "$PREFIX_FILTER" --dev-core --venv "$VENV_DIR"
+  else
+    bash "$RUST_SCRIPT" "$PREFIX_FILTER" --dev-core
+  fi
 else
-  bash "$RUST_SCRIPT" "$PREFIX_FILTER"
+  if [[ -n "${VENV_OVERRIDE:-}" ]]; then
+    bash "$RUST_SCRIPT" "$PREFIX_FILTER" --venv "$VENV_DIR"
+  else
+    bash "$RUST_SCRIPT" "$PREFIX_FILTER"
+  fi
 fi
+
 
 # ─────────────────────────────────────────────────────────────
 # Reinstall Python package in editable mode
