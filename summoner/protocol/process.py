@@ -291,7 +291,6 @@ class ParsedRoute:
                 # standalone → only the source nodes
                 return self.source
 
-
         # arrow route → pick based on the Action subtype
         if isinstance(event, Action.MOVE):
             return self.label + self.target
