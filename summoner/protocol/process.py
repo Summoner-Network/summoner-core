@@ -285,8 +285,12 @@ class ParsedRoute:
         that this route “activates” (i.e. should be added to the tape).
         """
         if isinstance(event, Event) and event is not None and not self.is_arrow:
-            # standalone → only the source nodes
-            return self.source
+            if isinstance(event, Action.TEST):
+                return ()
+            else:
+                # standalone → only the source nodes
+                return self.source
+
 
         # arrow route → pick based on the Action subtype
         if isinstance(event, Action.MOVE):
