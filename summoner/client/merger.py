@@ -70,7 +70,6 @@ class ClientMerger(SummonerClient):
         named_clients: list[Any],  # backward compatible: list[dict] or list[SummonerClient] or list[dna_list]
         name: Optional[str] = None,
         rebind_globals: Optional[dict[str, Any]] = None,
-        *,
         allow_context_imports: bool = True,
         verbose_context_imports: bool = False,
         close_subclients: bool = True,
@@ -448,7 +447,7 @@ class ClientMerger(SummonerClient):
         # ---------------------------------------------------------------------
         # If you store rebind globals on self, use that. Adjust attribute name
         # if yours differs.
-        rebind = getattr(self, "_rebind_globals", None)
+        rebind = self._rebind_globals
         if isinstance(rebind, dict) and rebind:
             # Update in-place so the constructed function sees these names later.
             g.update(rebind)
@@ -618,20 +617,37 @@ class ClientMerger(SummonerClient):
 
 class ClientTranslation(SummonerClient):
     """
-    Reconstruct a SummonerClient from its DNA list, inlining each handler
-    directly into its original module so that module-level globals (e.g. tracker)
-    are shared and updated.
-    """
+    Reconstruct a SummonerClient from its DNA list.
 
+    Handlers are re-created from their recorded source into a fresh sandbox module
+    (with optional context imports) and then registered onto this client.
+
+    This means translated handlers do NOT run inside the original agent modules.
+    They instead run in the translation sandbox, with only the explicitly imported
+    or rebound globals available (for example: viz, _content, Trigger/Event, etc.).
+
+    In particular, runtime/environmental dependencies are resolved from the
+    translated agent’s environment (for example load_triggers() reads TRIGGERS
+    next to the translated agent entrypoint), not from the environment of the
+    agent that originally produced the DNA.
+    """
     def __init__(
         self,
         dna_list: list[dict[str, Any]],
         name: Optional[str] = None,
-        var_name: Optional[str] = None,   # <-- change
+        var_name: Optional[str] = None,
+        rebind_globals: Optional[dict[str, Any]] = None,
+        allow_context_imports: bool = True,
+        verbose_context_imports: bool = False
     ):
         super().__init__(name=name)
+
         if not isinstance(dna_list, list):
             raise TypeError("dna_list must be a list of DNA entries")
+        
+        self._rebind_globals = dict(rebind_globals or {})
+        self._allow_context_imports = allow_context_imports
+        self._verbose_context_imports = verbose_context_imports
 
         # Extract optional context entry
         ctx = None
@@ -675,8 +691,16 @@ class ClientTranslation(SummonerClient):
 
         # Imports
         for line in self._context.get("imports", []) or []:
-            if isinstance(line, str) and line.strip():
+            if not isinstance(line, str) or not line.strip():
+                continue
+            if not self._allow_context_imports:
+                continue
+            try:
                 exec(line, g)
+                if self._verbose_context_imports:
+                    self.logger.info(f"[translation ctx] import ok: {line}")
+            except Exception as e:
+                self.logger.warning(f"[translation ctx] import failed: {line!r} ({type(e).__name__}: {e})")
 
         # Plain globals
         globs = self._context.get("globals", {}) or {}
@@ -765,6 +789,13 @@ class ClientTranslation(SummonerClient):
         module_globals = self._sandbox_globals
         module_globals[self._var_name] = self
 
+        # critical: inject runtime globals (viz, _content, OBJECTS, Trigger, Event, ...)
+        if self._rebind_globals:
+            module_globals.update(self._rebind_globals)
+
+        if "__builtins__" not in module_globals:
+            module_globals["__builtins__"] = __builtins__
+
         # strip off decorator lines so we only exec the `def` block
         raw = entry["source"]
         lines = raw.splitlines()
@@ -834,16 +865,28 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_senders(self):
+        g = self._sandbox_globals
+
+        # Ensure rebind globals are visible BEFORE resolving triggers/actions.
+        if self._rebind_globals:
+            g.update(self._rebind_globals)
+
+        TriggerCls = g.get("Trigger")
+        if TriggerCls is None:
+            TriggerCls = load_triggers()
+
         for entry in self._dna_list:
             if entry.get("type") != "send":
                 continue
-            fn     = self._make_from_source(entry)
-            dec    = self.send(
-                       entry["route"],
-                       multi=entry.get("multi", False),
-                       on_triggers={Signal[t] for t in entry.get("on_triggers", [])} or None,
-                       on_actions={getattr(Action, a) for a in entry.get("on_actions", [])} or None,
-                     )
+            fn = self._make_from_source(entry)
+            on_triggers = {_resolve_trigger(TriggerCls, t) for t in entry.get("on_triggers", [])} or None
+            on_actions  = {_resolve_action(Action, a) for a in entry.get("on_actions", [])} or None
+            dec = self.send(
+                entry["route"],
+                multi=entry.get("multi", False),
+                on_triggers=on_triggers,
+                on_actions=on_actions,
+            )
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_all(self):
