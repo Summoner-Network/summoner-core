@@ -18,141 +18,20 @@ from summoner.client.client import SummonerClient
 from summoner.protocol.triggers import Signal, Action
 from summoner.protocol.process import Direction
 
-# class ClientMerger(SummonerClient):
-#     """
-#     Merge multiple named SummonerClient instances into a single client, 
-#     replaying each handler but rebinding its module-level client nameto this merged instance.
-#     """
 
-#     def __init__(
-#         self,
-#         named_clients: list[dict[str, SummonerClient]],
-#         name: Optional[str] = None
-#     ):
-#         super().__init__(name=name)
-#         self.named_clients: list[dict[str, SummonerClient]] = []
-        
-#         # Validate and store the list of dicts {'var_name': var_name, 'client': client}
-#         for idx, entry in enumerate(named_clients):
-            
-#             if not isinstance(entry, dict):
-#                 raise TypeError(f"Entry #{idx} must be a dict, got {type(entry).__name__}")
-#             if 'var_name' not in entry or 'client' not in entry:
-#                 raise KeyError(
-#                     f"Entry #{idx} missing 'var_name' or 'client' key; got keys: {list(entry.keys())}"
-#                 )
+def _resolve_trigger(SignalCls, name: str):
+    # Enum-style: SignalCls["ok"]
+    try:
+        return SignalCls[name]
+    except Exception:
+        pass
+    # Attribute-style: SignalCls.ok
+    try:
+        return getattr(SignalCls, name)
+    except Exception:
+        pass
+    raise KeyError(f"Unknown trigger '{name}' for {SignalCls}")
 
-#             var_name = entry['var_name']
-#             client   = entry['client']
-
-#             if not isinstance(var_name, str):
-#                 raise TypeError(f"Entry #{idx} 'var_name' must be a str, got {type(var_name).__name__}")
-#             if not isinstance(client, SummonerClient):
-#                 raise TypeError(f"Entry #{idx} 'client' must be SummonerClient, got {type(client).__name__}")
-
-#             self.named_clients.append({'var_name': var_name, 'client': client})
-
-#         # Cancel any pending registration tasks and close each sub-client's loop
-#         for entry in self.named_clients:
-            
-#             var_name = entry['var_name']
-#             client   = entry['client']
-
-#             # 1) Cancel registration tasks
-#             for task in getattr(client, '_registration_tasks', []):
-#                 try:
-#                     task.cancel()
-#                 except Exception as e:
-#                     self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
-#             client._registration_tasks.clear()
-
-#             # 2) Close the event loop
-#             try:
-#                 client.loop.close()
-#             except Exception as e:
-#                 self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
-
-#     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
-#         """
-#         Clone `fn` so it shares its module globals (so module-level state
-#         like counters and locks remains shared) but rebinds the
-#         name `original_name` to this merged client.
-#         """
-#         g = fn.__globals__
-#         try:
-#             # Redirect the handler's client name to self
-#             g[original_name] = self
-#         except Exception as e:
-#             self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
-
-#         # Build the cloned function with the same code, defaults, closure
-#         new_fn = types.FunctionType(
-#             fn.__code__,
-#             g,
-#             name=fn.__name__,
-#             argdefs=fn.__defaults__,
-#             closure=fn.__closure__,
-#         )
-#         # Preserve metadata
-#         new_fn.__annotations__ = fn.__annotations__
-#         new_fn.__doc__         = fn.__doc__
-#         return new_fn
-
-#     def initiate_hooks(self):
-#         """
-#         Replay all @hook handlers from each sub-client, rebinding their
-#         module-level client name to this merged instance.
-#         """
-#         for entry in self.named_clients:
-#             var_name = entry['var_name']
-#             client   = entry['client']
-#             for dna in client._dna_hooks:
-#                 fn_clone = self._clone_handler(dna['fn'], var_name)
-#                 try:
-#                     self.hook(dna['direction'], priority=dna['priority'])(fn_clone)
-#                 except Exception as e:
-#                     self.logger.warning(
-#                         f"[{var_name}] Failed to replay hook '{dna['fn'].__name__}': {e}"
-#                     )
-
-#     def initiate_receivers(self):
-#         """
-#         Replay all @receive handlers from each sub-client.
-#         """
-#         for entry in self.named_clients:
-#             var_name = entry['var_name']
-#             client   = entry['client']
-#             for dna in client._dna_receivers:
-#                 fn_clone = self._clone_handler(dna['fn'], var_name)
-#                 try:
-#                     self.receive(dna['route'], priority=dna['priority'])(fn_clone)
-#                 except Exception as e:
-#                     self.logger.warning(
-#                         f"[{var_name}] Failed to replay receiver '{dna['fn'].__name__}' "
-#                         f"on route '{dna['route']}': {e}"
-#                     )
-
-#     def initiate_senders(self):
-#         """
-#         Replay all @send handlers from each sub-client.
-#         """
-#         for entry in self.named_clients:
-#             var_name = entry['var_name']
-#             client   = entry['client']
-#             for dna in client._dna_senders:
-#                 fn_clone = self._clone_handler(dna['fn'], var_name)
-#                 try:
-#                     self.send(
-#                         dna['route'],
-#                         multi=dna['multi'],
-#                         on_triggers=dna['on_triggers'],
-#                         on_actions=dna['on_actions'],
-#                     )(fn_clone)
-#                 except Exception as e:
-#                     self.logger.warning(
-#                         f"[{var_name}] Failed to replay sender '{dna['fn'].__name__}' "
-#                         f"on route '{dna['route']}': {e}"
-#                     )
 
 class ClientMerger(SummonerClient):
     """
@@ -483,24 +362,6 @@ class ClientMerger(SummonerClient):
     # Imported-client handler cloning
     # ----------------------------
 
-    # def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
-    #     g = fn.__globals__
-    #     try:
-    #         g[original_name] = self
-    #     except Exception as e:
-    #         self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
-
-    #     new_fn = types.FunctionType(
-    #         fn.__code__,
-    #         g,
-    #         name=fn.__name__,
-    #         argdefs=fn.__defaults__,
-    #         closure=fn.__closure__,
-    #     )
-    #     new_fn.__annotations__ = fn.__annotations__
-    #     new_fn.__doc__ = fn.__doc__
-    #     return new_fn
-
     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
         g = fn.__globals__
 
@@ -682,7 +543,7 @@ class ClientMerger(SummonerClient):
                     if entry.get("type") != "send":
                         continue
                     fn = self._make_from_source(entry, g, sandbox)
-                    on_triggers = {Signal[t] for t in entry.get("on_triggers", [])} or None
+                    on_triggers = {_resolve_trigger(Signal, t) for t in entry.get("on_triggers", [])} or None
                     on_actions = {getattr(Action, a) for a in entry.get("on_actions", [])} or None
                     dec = self.send(
                         entry["route"],
