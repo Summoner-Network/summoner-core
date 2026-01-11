@@ -225,10 +225,13 @@ class SummonerClient:
                 fn,
                 decorator_name="@upload_states",
                 allow_param=(type(None), str, dict, Any),   # the payload
-                allow_return=(type(None), str, 
-                                list, list[str], 
-                                dict, dict[str, str], dict[str, list[str]],
-                                dict[str, Union[str, list[str]]]), # the payload-dependent tape
+                allow_return=(type(None), str, Any, Node, list, dict,
+                                list[str],  dict[str, str],  dict[str, list[str]],
+                                list[Node], dict[str, Node], dict[str, list[Node]],
+                                dict[str, Union[str, list[str]]],
+                                dict[str, Union[Node, list[Node]]],
+                                dict[str, Union[str, list[str], Node, list[Node]]],
+                                ), # the payload-dependent tape
                 logger=self.logger,
             )
             
@@ -265,11 +268,16 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@download_states",
-                allow_param=(type(None), Node, Any,
-                                list, list[Node], 
-                                dict, dict[str, Node], dict[str, list[Node]], dict[str, Union[Node, list[Node]]], 
-                                dict[Optional[str], Node], dict[Optional[str], list[Node]],dict[Optional[str], Union[Node, list[Node]]]),
-                allow_return=(type(None), bool, Any),
+                allow_param=(type(None), Node, Any, list, dict, 
+                                list[Node], 
+                                dict[str, Node], 
+                                dict[str, list[Node]], 
+                                dict[str, Union[Node, list[Node]]], 
+                                dict[Optional[str], Node], 
+                                dict[Optional[str], list[Node]],
+                                dict[Optional[str], Union[Node, list[Node]]],
+                                ),
+                allow_return=(type(None), Any),
                 logger=self.logger,
             )
 
@@ -327,7 +335,7 @@ class SummonerClient:
                 fn,
                 decorator_name="@hook",
                 allow_param=(Any, str, dict),
-                allow_return=(type(None), str, dict),
+                allow_return=(type(None), str, dict, Any),
                 logger=self.logger,
             )
             
@@ -389,7 +397,7 @@ class SummonerClient:
                 fn,
                 decorator_name="@receive",
                 allow_param=(Any, str, dict),
-                allow_return=(type(None), Event),
+                allow_return=(type(None), Event, Any),
                 logger=self.logger,
             )
 
