@@ -171,12 +171,16 @@ class ClientMerger(SummonerClient):
         self,
         named_clients: list[Any],  # backward compatible: list[dict] or list[SummonerClient] or list[dna_list]
         name: Optional[str] = None,
+        rebind_globals: Optional[dict[str, Any]] = None,
         *,
         allow_context_imports: bool = True,
         verbose_context_imports: bool = False,
         close_subclients: bool = True,
     ):
         super().__init__(name=name)
+
+        self._rebind_globals = dict(rebind_globals or {})
+
         self._allow_context_imports = allow_context_imports
         self._verbose_context_imports = verbose_context_imports
         self._close_subclients = close_subclients
@@ -367,7 +371,7 @@ class ClientMerger(SummonerClient):
 
             client: SummonerClient = src["client"]
             var_name: str = src["var_name"]
-            
+
             tasks = list(client._registration_tasks or [])
             loop = client.loop
 
@@ -479,12 +483,39 @@ class ClientMerger(SummonerClient):
     # Imported-client handler cloning
     # ----------------------------
 
+    # def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
+    #     g = fn.__globals__
+    #     try:
+    #         g[original_name] = self
+    #     except Exception as e:
+    #         self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
+
+    #     new_fn = types.FunctionType(
+    #         fn.__code__,
+    #         g,
+    #         name=fn.__name__,
+    #         argdefs=fn.__defaults__,
+    #         closure=fn.__closure__,
+    #     )
+    #     new_fn.__annotations__ = fn.__annotations__
+    #     new_fn.__doc__ = fn.__doc__
+    #     return new_fn
+
     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
         g = fn.__globals__
+
+        # rebind the client variable name (agent/client/etc)
         try:
             g[original_name] = self
         except Exception as e:
             self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
+
+        # rebind any shared globals (viz, etc.)
+        for k, v in self._rebind_globals.items():
+            try:
+                g[k] = v
+            except Exception as e:
+                self.logger.warning(f"Could not bind global '{k}' in '{fn.__name__}': {e}")
 
         new_fn = types.FunctionType(
             fn.__code__,
@@ -493,9 +524,15 @@ class ClientMerger(SummonerClient):
             argdefs=fn.__defaults__,
             closure=fn.__closure__,
         )
-        new_fn.__annotations__ = fn.__annotations__
-        new_fn.__doc__ = fn.__doc__
+        new_fn.__annotations__ = getattr(fn, "__annotations__", {})
+        new_fn.__doc__ = getattr(fn, "__doc__", None)
+
+        # if your dna() uses a __dna_source__ fallback, keep it
+        if hasattr(fn, "__dna_source__"):
+            new_fn.__dna_source__ = fn.__dna_source__
+
         return new_fn
+
 
     # ----------------------------
     # DNA compilation (per-source sandbox)
