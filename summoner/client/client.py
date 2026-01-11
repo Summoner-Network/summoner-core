@@ -726,43 +726,210 @@ class SummonerClient:
             _lock_type = None
 
 
-        def _import_line_for(name: str, value: object) -> str | None:
+        # def _import_line_for(name: str, value: object) -> str | None:
+        #     # Modules are always importable
+        #     if isinstance(value, _types.ModuleType):
+        #         mod = value.__name__
+        #         leaf = mod.split(".")[-1]
+        #         if name == leaf:
+        #             return f"import {mod}"
+        #         return f"import {mod} as {name}"
+
+        #     # Only consider functions/classes as importables
+        #     if not (inspect.isfunction(value) or inspect.isclass(value)):
+        #         return None
+
+        #     mod = getattr(value, "__module__", None)
+        #     obj = getattr(value, "__name__", None)
+        #     if not (isinstance(mod, str) and isinstance(obj, str)) or mod == "builtins":
+        #         return None
+
+        #     # Verify it's actually exported by that module under that name
+        #     try:
+        #         from importlib import import_module
+        #         m = import_module(mod)
+        #     except Exception:
+        #         return None
+
+        #     if getattr(m, obj, None) is not value:
+        #         # Dynamic class/function not actually present in module namespace (e.g. flow.triggers())
+        #         return None
+
+        #     if name == obj:
+        #         return f"from {mod} import {obj}"
+        #     return f"from {mod} import {obj} as {name}"
+
+        # # Discover dependencies from all handlers
+        # for fn in handler_fns:
+        #     g = getattr(fn, "__globals__", {})
+        #     for name in getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ():
+        #         if name in excluded_names:
+        #             continue
+        #         if name in builtins.__dict__:
+        #             continue
+        #         if name not in g:
+        #             continue
+
+        #         value = g[name]
+
+        #         # Skip binding the client itself
+        #         if value is self:
+        #             continue
+        #         if isinstance(value, SummonerClient):
+        #             # other clients should not be auto-copied
+        #             missing.append(name)
+        #             continue
+
+        #         # Known rebuildable: asyncio locks
+        #         if _lock_type is not None and isinstance(value, _lock_type):
+        #             imports_out.add("import asyncio")
+        #             recipes.setdefault(name, "asyncio.Lock()")
+        #             continue
+
+        #         # Modules/classes/functions -> imports
+        #         line = _import_line_for(name, value)
+        #         if line is not None:
+        #             imports_out.add(line)
+        #             continue
+
+        #         # JSON-able constants -> globals
+        #         if _jsonable(value):
+        #             globals_out.setdefault(name, value)
+        #             continue
+
+        #         # Otherwise unknown
+        #         missing.append(name)
+        
+        # ---- context build (best-effort) ----
+        import ast
+        import textwrap
+        from pathlib import Path
+
+        known_modules: set[str] = set()
+
+        def _annotation_names_from_source(src: str) -> set[str]:
+            """
+            Best-effort: extract Name identifiers used in arg/return annotations
+            so annotation-only deps (ex: -> Event) get picked up.
+            """
+            out: set[str] = set()
+            try:
+                tree = ast.parse(textwrap.dedent(src))
+            except Exception:
+                return out
+
+            # Find first (async) function def in that snippet
+            fn_node = None
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    fn_node = node
+                    break
+            if fn_node is None:
+                return out
+
+            ann_nodes = []
+            for a in getattr(fn_node.args, "args", []):
+                if a.annotation is not None:
+                    ann_nodes.append(a.annotation)
+            for a in getattr(fn_node.args, "kwonlyargs", []):
+                if a.annotation is not None:
+                    ann_nodes.append(a.annotation)
+            if getattr(fn_node.args, "vararg", None) is not None and fn_node.args.vararg.annotation is not None:
+                ann_nodes.append(fn_node.args.vararg.annotation)
+            if getattr(fn_node.args, "kwarg", None) is not None and fn_node.args.kwarg.annotation is not None:
+                ann_nodes.append(fn_node.args.kwarg.annotation)
+            if fn_node.returns is not None:
+                ann_nodes.append(fn_node.returns)
+
+            for ann in ann_nodes:
+                for n in ast.walk(ann):
+                    if isinstance(n, ast.Name):
+                        out.add(n.id)
+            return out
+
+
+        def _import_line_for(name: str, value: object, g: dict[str, object]) -> str | None:
+            """
+            More general than before:
+            - still handles modules
+            - still handles exported functions/classes
+            - additionally handles exported constants/type-aliases (ex: Event)
+            by checking module.<name> is value
+            - avoids emitting 'from __main__ import X' by rewriting __main__ to file stem
+            """
             # Modules are always importable
             if isinstance(value, _types.ModuleType):
                 mod = value.__name__
+                known_modules.add(mod)
                 leaf = mod.split(".")[-1]
                 if name == leaf:
                     return f"import {mod}"
                 return f"import {mod} as {name}"
 
-            # Only consider functions/classes as importables
-            if not (inspect.isfunction(value) or inspect.isclass(value)):
-                return None
-
+            # Candidate module to import from
             mod = getattr(value, "__module__", None)
-            obj = getattr(value, "__name__", None)
-            if not (isinstance(mod, str) and isinstance(obj, str)) or mod == "builtins":
-                return None
 
-            # Verify it's actually exported by that module under that name
-            try:
-                from importlib import import_module
-                m = import_module(mod)
-            except Exception:
-                return None
+            # If the object says "__main__", rewrite using the defining file name
+            if mod == "__main__":
+                file = g.get("__file__")
+                if isinstance(file, str) and file.endswith(".py"):
+                    mod = Path(file).stem  # ex: agent_p1.py -> "agent_p1"
 
-            if getattr(m, obj, None) is not value:
-                # Dynamic class/function not actually present in module namespace (e.g. flow.triggers())
-                return None
+            if not isinstance(mod, str) or mod == "builtins":
+                # We can't infer a stable import origin
+                mod = None
 
-            if name == obj:
-                return f"from {mod} import {obj}"
-            return f"from {mod} import {obj} as {name}"
+            from importlib import import_module
+
+            # 1) If we have a module candidate, try "from mod import <name>"
+            if mod is not None:
+                try:
+                    m = import_module(mod)
+                    known_modules.add(mod)
+                    if getattr(m, name, None) is value:
+                        return f"from {mod} import {name}"
+                except Exception:
+                    pass
+
+                # Also try "from mod import <value.__name__>" for functions/classes/etc
+                obj = getattr(value, "__name__", None)
+                if isinstance(obj, str):
+                    try:
+                        m = import_module(mod)
+                        if getattr(m, obj, None) is value:
+                            if name == obj:
+                                return f"from {mod} import {obj}"
+                            return f"from {mod} import {obj} as {name}"
+                    except Exception:
+                        pass
+
+            # 2) Fallback: try modules we've already seen (Move/Stay/Test often reveals triggers module)
+            for km in tuple(known_modules):
+                try:
+                    m = import_module(km)
+                    if getattr(m, name, None) is value:
+                        return f"from {km} import {name}"
+                except Exception:
+                    continue
+
+            return None
+
 
         # Discover dependencies from all handlers
         for fn in handler_fns:
             g = getattr(fn, "__globals__", {})
-            for name in getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ():
+
+            # names used in bytecode
+            names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
+
+            # plus names used only in annotations (best-effort)
+            try:
+                src = inspect.getsource(fn)
+                names_to_scan |= _annotation_names_from_source(src)
+            except Exception:
+                pass
+
+            for name in names_to_scan:
                 if name in excluded_names:
                     continue
                 if name in builtins.__dict__:
@@ -776,7 +943,6 @@ class SummonerClient:
                 if value is self:
                     continue
                 if isinstance(value, SummonerClient):
-                    # other clients should not be auto-copied
                     missing.append(name)
                     continue
 
@@ -786,8 +952,8 @@ class SummonerClient:
                     recipes.setdefault(name, "asyncio.Lock()")
                     continue
 
-                # Modules/classes/functions -> imports
-                line = _import_line_for(name, value)
+                # Modules / exported objects / exported constants -> imports
+                line = _import_line_for(name, value, g)
                 if line is not None:
                     imports_out.add(line)
                     continue
@@ -799,6 +965,7 @@ class SummonerClient:
 
                 # Otherwise unknown
                 missing.append(name)
+
 
         context_entry = {
             "type": "__context__",

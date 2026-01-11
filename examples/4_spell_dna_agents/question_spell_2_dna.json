@@ -6,6 +6,7 @@
       "from summoner.protocol.process import Node",
       "from summoner.protocol.triggers import Move",
       "from typing import *",
+      "from typing import Union",
       "import asyncio"
     ],
     "globals": {
