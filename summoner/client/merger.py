@@ -1,12 +1,13 @@
 from importlib import import_module
 from typing import Optional, Any
+from contextlib import suppress
+from pathlib import Path
 import inspect
 import asyncio
 import types
 import re
 import json
 import uuid
-from pathlib import Path
 
 import os, sys
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -296,29 +297,123 @@ class ClientMerger(SummonerClient):
                     return k
         return None
 
+    def _cancel_and_drain_loop(self, loop: asyncio.AbstractEventLoop, tasks: list[asyncio.Task], *, label: str) -> None:
+        if not loop or loop.is_closed() or not tasks:
+            return
+
+        # If someone is actually running that loop, we cannot run_until_complete safely.
+        if loop.is_running():
+            for t in tasks:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+            return
+
+        # Cancel then give the loop a chance to process cancellations.
+        for t in tasks:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+
+        prev_loop = None
+        try:
+            # Some coroutine code may use get_event_loop(); set context.
+            try:
+                prev_loop = asyncio.get_event_loop_policy().get_event_loop()
+            except Exception:
+                prev_loop = None
+
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        except Exception as e:
+            # Do not fail merge on template shutdown; just log.
+            self.logger.debug(f"[merge] drain failed for {label}: {e}")
+        finally:
+            try:
+                asyncio.set_event_loop(prev_loop)
+            except Exception:
+                pass
+
+    # def _shutdown_imported_clients(self) -> None:
+    #     for src in self.sources:
+    #         if src.get("kind") != "client":
+    #             continue
+    #         var_name = src["var_name"]
+    #         client = src["client"]
+
+    #         # cancel registration tasks
+    #         for task in getattr(client, "_registration_tasks", []):
+    #             try:
+    #                 task.cancel()
+    #             except Exception as e:
+    #                 self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
+    #         try:
+    #             client._registration_tasks.clear()
+    #         except Exception:
+    #             pass
+
+    #         # close loop
+    #         try:
+    #             client.loop.close()
+    #         except Exception as e:
+    #             self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
+
     def _shutdown_imported_clients(self) -> None:
         for src in self.sources:
             if src.get("kind") != "client":
                 continue
+
             var_name = src["var_name"]
             client = src["client"]
 
-            # cancel registration tasks
-            for task in getattr(client, "_registration_tasks", []):
-                try:
-                    task.cancel()
-                except Exception as e:
-                    self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
-            try:
-                client._registration_tasks.clear()
-            except Exception:
-                pass
+            tasks = list(getattr(client, "_registration_tasks", []) or [])
+            loop = getattr(client, "loop", None)
 
-            # close loop
-            try:
-                client.loop.close()
-            except Exception as e:
-                self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
+            # Nothing to do.
+            if not tasks and (loop is None or loop.is_closed()):
+                continue
+
+            # 1) cancel tasks
+            for t in tasks:
+                with suppress(Exception):
+                    t.cancel()
+
+            # 2) drain tasks on *that* loop so they are actually awaited
+            if loop is not None and not loop.is_closed():
+                if loop.is_running():
+                    # Can't safely run_until_complete; also shouldn't close a running loop.
+                    self.logger.warning(
+                        f"[{var_name}] Imported client loop is running; "
+                        f"cannot drain/close registration tasks cleanly."
+                    )
+                else:
+                    old_loop = None
+                    try:
+                        # Set context so asyncio.gather/futures bind to the right loop.
+                        with suppress(Exception):
+                            old_loop = asyncio.get_event_loop_policy().get_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                        # Await cancellation. This is what prevents the warnings.
+                        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                    except Exception as e:
+                        self.logger.warning(f"[{var_name}] Error draining registration tasks: {e}")
+                    finally:
+                        # Restore previous loop context (or clear it).
+                        with suppress(Exception):
+                            asyncio.set_event_loop(old_loop)
+
+                    # 3) close loop after drain
+                    try:
+                        loop.close()
+                    except Exception as e:
+                        self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
+
+            # 4) clear list
+            with suppress(Exception):
+                client._registration_tasks.clear()
 
     # ----------------------------
     # Context application (DNA)
