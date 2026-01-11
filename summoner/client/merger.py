@@ -15,22 +15,22 @@ if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
 from summoner.client.client import SummonerClient
-from summoner.protocol.triggers import Signal, Action
+from summoner.protocol.triggers import Signal, Action, load_triggers
 from summoner.protocol.process import Direction
 
 
-def _resolve_trigger(SignalCls, name: str):
+def _resolve_trigger(TriggerCls, name: str):
     # Enum-style: SignalCls["ok"]
     try:
-        return SignalCls[name]
+        return TriggerCls[name]
     except Exception:
         pass
     # Attribute-style: SignalCls.ok
     try:
-        return getattr(SignalCls, name)
+        return getattr(TriggerCls, name)
     except Exception:
         pass
-    raise KeyError(f"Unknown trigger '{name}' for {SignalCls}")
+    raise KeyError(f"Unknown trigger '{name}' for {TriggerCls}")
 
 
 class ClientMerger(SummonerClient):
@@ -539,11 +539,17 @@ class ClientMerger(SummonerClient):
             else:
                 g = src["globals"]
                 sandbox = src["sandbox_name"]
+
+                TriggerCls = g.get("Trigger")
+                if TriggerCls is None:
+                    # loads TRIGGERS from the directory of the running script (via sys.argv[0] in your code)
+                    TriggerCls = load_triggers()
+
                 for entry in src["dna_entries"]:
                     if entry.get("type") != "send":
                         continue
                     fn = self._make_from_source(entry, g, sandbox)
-                    on_triggers = {_resolve_trigger(Signal, t) for t in entry.get("on_triggers", [])} or None
+                    on_triggers = {_resolve_trigger(TriggerCls, t) for t in entry.get("on_triggers", [])} or None
                     on_actions = {getattr(Action, a) for a in entry.get("on_actions", [])} or None
                     dec = self.send(
                         entry["route"],
