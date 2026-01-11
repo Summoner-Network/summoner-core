@@ -4,6 +4,9 @@ import inspect
 import asyncio
 import types
 import re
+import json
+import uuid
+from pathlib import Path
 
 import os, sys
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -14,74 +17,380 @@ from summoner.client.client import SummonerClient
 from summoner.protocol.triggers import Signal, Action
 from summoner.protocol.process import Direction
 
+# class ClientMerger(SummonerClient):
+#     """
+#     Merge multiple named SummonerClient instances into a single client, 
+#     replaying each handler but rebinding its module-level client nameto this merged instance.
+#     """
+
+#     def __init__(
+#         self,
+#         named_clients: list[dict[str, SummonerClient]],
+#         name: Optional[str] = None
+#     ):
+#         super().__init__(name=name)
+#         self.named_clients: list[dict[str, SummonerClient]] = []
+        
+#         # Validate and store the list of dicts {'var_name': var_name, 'client': client}
+#         for idx, entry in enumerate(named_clients):
+            
+#             if not isinstance(entry, dict):
+#                 raise TypeError(f"Entry #{idx} must be a dict, got {type(entry).__name__}")
+#             if 'var_name' not in entry or 'client' not in entry:
+#                 raise KeyError(
+#                     f"Entry #{idx} missing 'var_name' or 'client' key; got keys: {list(entry.keys())}"
+#                 )
+
+#             var_name = entry['var_name']
+#             client   = entry['client']
+
+#             if not isinstance(var_name, str):
+#                 raise TypeError(f"Entry #{idx} 'var_name' must be a str, got {type(var_name).__name__}")
+#             if not isinstance(client, SummonerClient):
+#                 raise TypeError(f"Entry #{idx} 'client' must be SummonerClient, got {type(client).__name__}")
+
+#             self.named_clients.append({'var_name': var_name, 'client': client})
+
+#         # Cancel any pending registration tasks and close each sub-client's loop
+#         for entry in self.named_clients:
+            
+#             var_name = entry['var_name']
+#             client   = entry['client']
+
+#             # 1) Cancel registration tasks
+#             for task in getattr(client, '_registration_tasks', []):
+#                 try:
+#                     task.cancel()
+#                 except Exception as e:
+#                     self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
+#             client._registration_tasks.clear()
+
+#             # 2) Close the event loop
+#             try:
+#                 client.loop.close()
+#             except Exception as e:
+#                 self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
+
+#     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
+#         """
+#         Clone `fn` so it shares its module globals (so module-level state
+#         like counters and locks remains shared) but rebinds the
+#         name `original_name` to this merged client.
+#         """
+#         g = fn.__globals__
+#         try:
+#             # Redirect the handler's client name to self
+#             g[original_name] = self
+#         except Exception as e:
+#             self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
+
+#         # Build the cloned function with the same code, defaults, closure
+#         new_fn = types.FunctionType(
+#             fn.__code__,
+#             g,
+#             name=fn.__name__,
+#             argdefs=fn.__defaults__,
+#             closure=fn.__closure__,
+#         )
+#         # Preserve metadata
+#         new_fn.__annotations__ = fn.__annotations__
+#         new_fn.__doc__         = fn.__doc__
+#         return new_fn
+
+#     def initiate_hooks(self):
+#         """
+#         Replay all @hook handlers from each sub-client, rebinding their
+#         module-level client name to this merged instance.
+#         """
+#         for entry in self.named_clients:
+#             var_name = entry['var_name']
+#             client   = entry['client']
+#             for dna in client._dna_hooks:
+#                 fn_clone = self._clone_handler(dna['fn'], var_name)
+#                 try:
+#                     self.hook(dna['direction'], priority=dna['priority'])(fn_clone)
+#                 except Exception as e:
+#                     self.logger.warning(
+#                         f"[{var_name}] Failed to replay hook '{dna['fn'].__name__}': {e}"
+#                     )
+
+#     def initiate_receivers(self):
+#         """
+#         Replay all @receive handlers from each sub-client.
+#         """
+#         for entry in self.named_clients:
+#             var_name = entry['var_name']
+#             client   = entry['client']
+#             for dna in client._dna_receivers:
+#                 fn_clone = self._clone_handler(dna['fn'], var_name)
+#                 try:
+#                     self.receive(dna['route'], priority=dna['priority'])(fn_clone)
+#                 except Exception as e:
+#                     self.logger.warning(
+#                         f"[{var_name}] Failed to replay receiver '{dna['fn'].__name__}' "
+#                         f"on route '{dna['route']}': {e}"
+#                     )
+
+#     def initiate_senders(self):
+#         """
+#         Replay all @send handlers from each sub-client.
+#         """
+#         for entry in self.named_clients:
+#             var_name = entry['var_name']
+#             client   = entry['client']
+#             for dna in client._dna_senders:
+#                 fn_clone = self._clone_handler(dna['fn'], var_name)
+#                 try:
+#                     self.send(
+#                         dna['route'],
+#                         multi=dna['multi'],
+#                         on_triggers=dna['on_triggers'],
+#                         on_actions=dna['on_actions'],
+#                     )(fn_clone)
+#                 except Exception as e:
+#                     self.logger.warning(
+#                         f"[{var_name}] Failed to replay sender '{dna['fn'].__name__}' "
+#                         f"on route '{dna['route']}': {e}"
+#                     )
+
 class ClientMerger(SummonerClient):
     """
-    Merge multiple named SummonerClient instances into a single client, 
-    replaying each handler but rebinding its module-level client nameto this merged instance.
+    Merge multiple sources into one client.
+
+    Each source can be:
+      - an imported SummonerClient (module-backed)
+      - a DNA list (loaded from JSON)
+      - a DNA file path (JSON)
+
+    For imported clients, handlers keep sharing their original module globals.
+    For DNA sources, handlers live in a per-source sandbox module + context globals.
     """
 
     def __init__(
         self,
-        named_clients: list[dict[str, SummonerClient]],
-        name: Optional[str] = None
+        named_clients: list[Any],  # backward compatible: list[dict] or list[SummonerClient] or list[dna_list]
+        name: Optional[str] = None,
+        *,
+        allow_context_imports: bool = True,
+        verbose_context_imports: bool = False,
+        close_subclients: bool = True,
     ):
         super().__init__(name=name)
-        self.named_clients: list[dict[str, SummonerClient]] = []
-        
-        # Validate and store the list of dicts {'var_name': var_name, 'client': client}
+        self._allow_context_imports = allow_context_imports
+        self._verbose_context_imports = verbose_context_imports
+        self._close_subclients = close_subclients
+
+        self.sources: list[dict[str, Any]] = []
+        self._import_reports: list[dict[str, Any]] = []
+
         for idx, entry in enumerate(named_clients):
-            
-            if not isinstance(entry, dict):
-                raise TypeError(f"Entry #{idx} must be a dict, got {type(entry).__name__}")
-            if 'var_name' not in entry or 'client' not in entry:
-                raise KeyError(
-                    f"Entry #{idx} missing 'var_name' or 'client' key; got keys: {list(entry.keys())}"
-                )
+            src = self._normalize_source(entry, idx)
+            self.sources.append(src)
 
-            var_name = entry['var_name']
-            client   = entry['client']
+        if self._close_subclients:
+            self._shutdown_imported_clients()
 
-            if not isinstance(var_name, str):
-                raise TypeError(f"Entry #{idx} 'var_name' must be a str, got {type(var_name).__name__}")
+    # ----------------------------
+    # Source normalization
+    # ----------------------------
+
+    def _normalize_source(self, entry: Any, idx: int) -> dict[str, Any]:
+        # Allow passing a SummonerClient directly
+        if isinstance(entry, SummonerClient):
+            entry = {"client": entry}
+
+        # Allow passing a dna_list directly
+        if isinstance(entry, list):
+            entry = {"dna_list": entry}
+
+        if not isinstance(entry, dict):
+            raise TypeError(f"Entry #{idx} must be dict | SummonerClient | dna_list, got {type(entry).__name__}")
+
+        if "client" in entry:
+            client = entry["client"]
             if not isinstance(client, SummonerClient):
                 raise TypeError(f"Entry #{idx} 'client' must be SummonerClient, got {type(client).__name__}")
 
-            self.named_clients.append({'var_name': var_name, 'client': client})
+            var_name = entry.get("var_name")
+            if var_name is None:
+                var_name = self._infer_client_var_name(client) or "agent"
+            if not isinstance(var_name, str):
+                raise TypeError(f"Entry #{idx} 'var_name' must be str, got {type(var_name).__name__}")
 
-        # Cancel any pending registration tasks and close each sub-client's loop
-        for entry in self.named_clients:
-            
-            var_name = entry['var_name']
-            client   = entry['client']
+            return {
+                "kind": "client",
+                "client": client,
+                "var_name": var_name,
+            }
 
-            # 1) Cancel registration tasks
-            for task in getattr(client, '_registration_tasks', []):
+        # DNA sources
+        dna_list = None
+        if "dna_list" in entry:
+            dna_list = entry["dna_list"]
+        elif "dna_path" in entry:
+            p = Path(entry["dna_path"])
+            dna_list = json.loads(p.read_text(encoding="utf-8"))
+        else:
+            raise KeyError(f"Entry #{idx} must contain 'client' or 'dna_list' or 'dna_path'")
+
+        if not isinstance(dna_list, list):
+            raise TypeError(f"Entry #{idx} DNA must be a list, got {type(dna_list).__name__}")
+
+        ctx = None
+        entries = dna_list
+        if entries and isinstance(entries[0], dict) and entries[0].get("type") == "__context__":
+            ctx = entries[0]
+            entries = entries[1:]
+
+        var_name = entry.get("var_name")
+        if var_name is None:
+            ctx_var = ctx.get("var_name") if isinstance(ctx, dict) else None
+            var_name = ctx_var if isinstance(ctx_var, str) and ctx_var else "agent"
+        if not isinstance(var_name, str):
+            raise TypeError(f"Entry #{idx} 'var_name' must be str, got {type(var_name).__name__}")
+
+        sandbox_module_name = f"summoner_merge_{uuid.uuid4().hex}"
+        sandbox_module = types.ModuleType(sandbox_module_name)
+        sys.modules[sandbox_module_name] = sandbox_module
+        g = sandbox_module.__dict__
+
+        # bind the client name used inside handler source to the *merged* client
+        g[var_name] = self
+
+        # apply context (imports/globals/recipes) into that sandbox
+        report = self._apply_context(ctx, g, label=f"source#{idx}")
+        self._import_reports.append(report)
+
+        return {
+            "kind": "dna",
+            "dna_entries": entries,
+            "context": ctx,
+            "var_name": var_name,
+            "sandbox_name": sandbox_module_name,
+            "globals": g,
+            "import_report": report,
+        }
+
+    def _infer_client_var_name(self, client: SummonerClient) -> Optional[str]:
+        # Look for a module-global name whose value is exactly `client`
+        candidates = []
+        if getattr(client, "_upload_states", None) is not None:
+            candidates.append(client._upload_states)
+        if getattr(client, "_download_states", None) is not None:
+            candidates.append(client._download_states)
+        for d in getattr(client, "_dna_receivers", []):
+            candidates.append(d.get("fn"))
+        for d in getattr(client, "_dna_senders", []):
+            candidates.append(d.get("fn"))
+        for d in getattr(client, "_dna_hooks", []):
+            candidates.append(d.get("fn"))
+
+        for fn in candidates:
+            if fn is None:
+                continue
+            g = getattr(fn, "__globals__", None)
+            if not isinstance(g, dict):
+                continue
+            for k, v in g.items():
+                if v is client and isinstance(k, str):
+                    return k
+        return None
+
+    def _shutdown_imported_clients(self) -> None:
+        for src in self.sources:
+            if src.get("kind") != "client":
+                continue
+            var_name = src["var_name"]
+            client = src["client"]
+
+            # cancel registration tasks
+            for task in getattr(client, "_registration_tasks", []):
                 try:
                     task.cancel()
                 except Exception as e:
                     self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
-            client._registration_tasks.clear()
+            try:
+                client._registration_tasks.clear()
+            except Exception:
+                pass
 
-            # 2) Close the event loop
+            # close loop
             try:
                 client.loop.close()
             except Exception as e:
                 self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
 
+    # ----------------------------
+    # Context application (DNA)
+    # ----------------------------
+
+    def _apply_context(self, ctx: Optional[dict], g: dict, *, label: str) -> dict[str, Any]:
+        report = {"label": label, "succeeded": [], "failed": [], "skipped": []}
+
+        if not isinstance(ctx, dict):
+            return report
+
+        # imports (safe)
+        for line in (ctx.get("imports") or []):
+            if not isinstance(line, str) or not line.strip():
+                continue
+
+            if not self._allow_context_imports:
+                report["skipped"].append(line)
+                continue
+
+            try:
+                exec(line, g)
+                report["succeeded"].append(line)
+                if self._verbose_context_imports:
+                    self.logger.info(f"[merge ctx:{label}] import ok: {line}")
+            except Exception as e:
+                report["failed"].append((line, f"{type(e).__name__}: {e}"))
+                self.logger.warning(f"[merge ctx:{label}] import failed: {line!r} ({type(e).__name__}: {e})")
+
+        # plain globals
+        globs = ctx.get("globals") or {}
+        if isinstance(globs, dict):
+            for k, v in globs.items():
+                if isinstance(k, str):
+                    g.setdefault(k, v)
+
+        # recipes
+        recipes = ctx.get("recipes") or {}
+        if isinstance(recipes, dict):
+            for k, expr in recipes.items():
+                if not (isinstance(k, str) and isinstance(expr, str)):
+                    continue
+                try:
+                    g.setdefault(k, eval(expr, g, {}))
+                except Exception as e:
+                    self.logger.warning(f"[merge ctx:{label}] recipe failed {k}={expr!r} ({type(e).__name__}: {e})")
+
+        return report
+
+    # ----------------------------
+    # Utility: source patch for getsource capture
+    # ----------------------------
+
+    def _apply_with_source_patch(self, decorator, fn, source: str):
+        orig = inspect.getsource
+        inspect.getsource = lambda o: source
+        try:
+            decorator(fn)
+        finally:
+            inspect.getsource = orig
+
+    # ----------------------------
+    # Imported-client handler cloning
+    # ----------------------------
+
     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
-        """
-        Clone `fn` so it shares its module globals (so module-level state
-        like counters and locks remains shared) but rebinds the
-        name `original_name` to this merged client.
-        """
         g = fn.__globals__
         try:
-            # Redirect the handler's client name to self
             g[original_name] = self
         except Exception as e:
             self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
 
-        # Build the cloned function with the same code, defaults, closure
         new_fn = types.FunctionType(
             fn.__code__,
             g,
@@ -89,67 +398,174 @@ class ClientMerger(SummonerClient):
             argdefs=fn.__defaults__,
             closure=fn.__closure__,
         )
-        # Preserve metadata
         new_fn.__annotations__ = fn.__annotations__
-        new_fn.__doc__         = fn.__doc__
+        new_fn.__doc__ = fn.__doc__
         return new_fn
 
-    def initiate_hooks(self):
-        """
-        Replay all @hook handlers from each sub-client, rebinding their
-        module-level client name to this merged instance.
-        """
-        for entry in self.named_clients:
-            var_name = entry['var_name']
-            client   = entry['client']
-            for dna in client._dna_hooks:
-                fn_clone = self._clone_handler(dna['fn'], var_name)
+    # ----------------------------
+    # DNA compilation (per-source sandbox)
+    # ----------------------------
+
+    def _make_from_source(self, entry: dict[str, Any], g: dict, sandbox_name: str) -> types.FunctionType:
+        fn_name = entry["fn_name"]
+        raw = entry["source"]
+        lines = raw.splitlines()
+
+        for idx, line in enumerate(lines):
+            pat = rf"\s*(async\s+)?def\s+{re.escape(fn_name)}\b"
+            if re.match(pat, line):
+                func_body = "\n".join(lines[idx:])
+                break
+        else:
+            raise RuntimeError(f"Could not find def for '{fn_name}'")
+
+        exec(compile(func_body, filename=f"<{sandbox_name}>", mode="exec"), g)
+        fn = g.get(fn_name)
+        if not isinstance(fn, types.FunctionType):
+            raise RuntimeError(f"Failed to construct function '{fn_name}'")
+        return fn
+
+    # ----------------------------
+    # Public replay API
+    # ----------------------------
+
+    def initiate_upload_states(self):
+        for src in self.sources:
+            if src["kind"] == "client":
+                client = src["client"]
+                var_name = src["var_name"]
+                fn = getattr(client, "_upload_states", None)
+                if fn is None:
+                    continue
+                fn_clone = self._clone_handler(fn, var_name)
                 try:
-                    self.hook(dna['direction'], priority=dna['priority'])(fn_clone)
+                    self.upload_states()(fn_clone)
                 except Exception as e:
-                    self.logger.warning(
-                        f"[{var_name}] Failed to replay hook '{dna['fn'].__name__}': {e}"
-                    )
+                    self.logger.warning(f"[{var_name}] Failed to replay upload_states '{fn.__name__}': {e}")
+
+            else:
+                g = src["globals"]
+                sandbox = src["sandbox_name"]
+                for entry in src["dna_entries"]:
+                    if entry.get("type") != "upload_states":
+                        continue
+                    fn = self._make_from_source(entry, g, sandbox)
+                    dec = self.upload_states()
+                    self._apply_with_source_patch(dec, fn, entry["source"])
+
+    def initiate_download_states(self):
+        for src in self.sources:
+            if src["kind"] == "client":
+                client = src["client"]
+                var_name = src["var_name"]
+                fn = getattr(client, "_download_states", None)
+                if fn is None:
+                    continue
+                fn_clone = self._clone_handler(fn, var_name)
+                try:
+                    self.download_states()(fn_clone)
+                except Exception as e:
+                    self.logger.warning(f"[{var_name}] Failed to replay download_states '{fn.__name__}': {e}")
+
+            else:
+                g = src["globals"]
+                sandbox = src["sandbox_name"]
+                for entry in src["dna_entries"]:
+                    if entry.get("type") != "download_states":
+                        continue
+                    fn = self._make_from_source(entry, g, sandbox)
+                    dec = self.download_states()
+                    self._apply_with_source_patch(dec, fn, entry["source"])
+
+    def initiate_hooks(self):
+        for src in self.sources:
+            if src["kind"] == "client":
+                client = src["client"]
+                var_name = src["var_name"]
+                for dna in getattr(client, "_dna_hooks", []):
+                    fn_clone = self._clone_handler(dna["fn"], var_name)
+                    try:
+                        self.hook(dna["direction"], priority=dna["priority"])(fn_clone)
+                    except Exception as e:
+                        self.logger.warning(f"[{var_name}] Failed to replay hook '{dna['fn'].__name__}': {e}")
+
+            else:
+                g = src["globals"]
+                sandbox = src["sandbox_name"]
+                for entry in src["dna_entries"]:
+                    if entry.get("type") != "hook":
+                        continue
+                    fn = self._make_from_source(entry, g, sandbox)
+                    direction = Direction[entry["direction"]] if isinstance(entry.get("direction"), str) else entry["direction"]
+                    dec = self.hook(direction, priority=tuple(entry.get("priority", ())))
+                    self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_receivers(self):
-        """
-        Replay all @receive handlers from each sub-client.
-        """
-        for entry in self.named_clients:
-            var_name = entry['var_name']
-            client   = entry['client']
-            for dna in client._dna_receivers:
-                fn_clone = self._clone_handler(dna['fn'], var_name)
-                try:
-                    self.receive(dna['route'], priority=dna['priority'])(fn_clone)
-                except Exception as e:
-                    self.logger.warning(
-                        f"[{var_name}] Failed to replay receiver '{dna['fn'].__name__}' "
-                        f"on route '{dna['route']}': {e}"
-                    )
+        for src in self.sources:
+            if src["kind"] == "client":
+                client = src["client"]
+                var_name = src["var_name"]
+                for dna in getattr(client, "_dna_receivers", []):
+                    fn_clone = self._clone_handler(dna["fn"], var_name)
+                    try:
+                        self.receive(dna["route"], priority=dna["priority"])(fn_clone)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[{var_name}] Failed to replay receiver '{dna['fn'].__name__}' on route '{dna['route']}': {e}"
+                        )
+
+            else:
+                g = src["globals"]
+                sandbox = src["sandbox_name"]
+                for entry in src["dna_entries"]:
+                    if entry.get("type") != "receive":
+                        continue
+                    fn = self._make_from_source(entry, g, sandbox)
+                    dec = self.receive(entry["route"], priority=tuple(entry.get("priority", ())))
+                    self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_senders(self):
-        """
-        Replay all @send handlers from each sub-client.
-        """
-        for entry in self.named_clients:
-            var_name = entry['var_name']
-            client   = entry['client']
-            for dna in client._dna_senders:
-                fn_clone = self._clone_handler(dna['fn'], var_name)
-                try:
-                    self.send(
-                        dna['route'],
-                        multi=dna['multi'],
-                        on_triggers=dna['on_triggers'],
-                        on_actions=dna['on_actions'],
-                    )(fn_clone)
-                except Exception as e:
-                    self.logger.warning(
-                        f"[{var_name}] Failed to replay sender '{dna['fn'].__name__}' "
-                        f"on route '{dna['route']}': {e}"
-                    )
+        for src in self.sources:
+            if src["kind"] == "client":
+                client = src["client"]
+                var_name = src["var_name"]
+                for dna in getattr(client, "_dna_senders", []):
+                    fn_clone = self._clone_handler(dna["fn"], var_name)
+                    try:
+                        self.send(
+                            dna["route"],
+                            multi=dna["multi"],
+                            on_triggers=dna["on_triggers"],
+                            on_actions=dna["on_actions"],
+                        )(fn_clone)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"[{var_name}] Failed to replay sender '{dna['fn'].__name__}' on route '{dna['route']}': {e}"
+                        )
 
+            else:
+                g = src["globals"]
+                sandbox = src["sandbox_name"]
+                for entry in src["dna_entries"]:
+                    if entry.get("type") != "send":
+                        continue
+                    fn = self._make_from_source(entry, g, sandbox)
+                    on_triggers = {Signal[t] for t in entry.get("on_triggers", [])} or None
+                    on_actions = {getattr(Action, a) for a in entry.get("on_actions", [])} or None
+                    dec = self.send(
+                        entry["route"],
+                        multi=entry.get("multi", False),
+                        on_triggers=on_triggers,
+                        on_actions=on_actions,
+                    )
+                    self._apply_with_source_patch(dec, fn, entry["source"])
+
+    def initiate_all(self):
+        self.initiate_upload_states()
+        self.initiate_download_states()
+        self.initiate_hooks()
+        self.initiate_receivers()
+        self.initiate_senders()
 
 class ClientTranslation(SummonerClient):
     """
@@ -162,29 +578,145 @@ class ClientTranslation(SummonerClient):
         self,
         dna_list: list[dict[str, Any]],
         name: Optional[str] = None,
-        var_name: str = "agent"
+        var_name: Optional[str] = None,   # <-- change
     ):
         super().__init__(name=name)
         if not isinstance(dna_list, list):
             raise TypeError("dna_list must be a list of DNA entries")
+
+        # Extract optional context entry
+        ctx = None
+        if dna_list and isinstance(dna_list[0], dict) and dna_list[0].get("type") == "__context__":
+            ctx = dna_list[0]
+            dna_list = dna_list[1:]
+
+        # Decide binding name:
+        # - explicit var_name wins (admin override)
+        # - else use context var_name if present
+        # - else default to "agent"
+        if var_name is None:
+            ctx_var = ctx.get("var_name") if isinstance(ctx, dict) else None
+            var_name = ctx_var if isinstance(ctx_var, str) and ctx_var else "agent"
+
         self._dna_list = dna_list
         if not isinstance(var_name, str):
             raise TypeError("var_name must be a string")
         self._var_name = var_name
+        self._context = ctx
+
+        # Create a sandbox module for translated code (independent from user imports)
+        self._sandbox_module_name = f"summoner_translation_{uuid.uuid4().hex}"
+        self._sandbox_module = types.ModuleType(self._sandbox_module_name)
+        sys.modules[self._sandbox_module_name] = self._sandbox_module
+        self._sandbox_globals = self._sandbox_module.__dict__
+
+        # Bind the client name used in handler source
+        self._sandbox_globals[self._var_name] = self
+
+        # Apply context if present
+        self._apply_context()
+
+        self._cleanup_template_clients_from_modules()
+
+    def _apply_context(self):
+        if not isinstance(self._context, dict):
+            return
+
+        g = self._sandbox_globals
+
+        # Imports
+        for line in self._context.get("imports", []) or []:
+            if isinstance(line, str) and line.strip():
+                exec(line, g)
+
+        # Plain globals
+        globs = self._context.get("globals", {}) or {}
+        if isinstance(globs, dict):
+            for k, v in globs.items():
+                if isinstance(k, str):
+                    g.setdefault(k, v)
+
+        # Recipes
+        rec = self._context.get("recipes", {}) or {}
+        if isinstance(rec, dict):
+            for k, expr in rec.items():
+                if not (isinstance(k, str) and isinstance(expr, str)):
+                    continue
+                # eval in the sandbox global namespace
+                try:
+                    g.setdefault(k, eval(expr, g, {}))
+                except Exception as e:
+                    self.logger.warning(f"Could not eval recipe for {k}: {expr!r} ({e})")
+
+    def _cleanup_one_template_client(self, client: SummonerClient, label: str):
+        """
+        Best-effort: cancel & await pending registration tasks, then close the client's loop.
+        This mirrors the behavior that makes ClientMerger not leak shutdown warnings.
+        """
+        regs = list(getattr(client, "_registration_tasks", []) or [])
+        loop = getattr(client, "loop", None)
+
+        # cancel registrations
+        for t in regs:
+            try:
+                t.cancel()
+            except Exception:
+                pass
+
+        # drain cancellations if we can drive that loop
+        try:
+            if regs and loop is not None and (not loop.is_running()) and (not loop.is_closed()):
+                loop.run_until_complete(asyncio.gather(*regs, return_exceptions=True))
+        except Exception:
+            # best-effort only
+            pass
+
+        # clear list
+        try:
+            client._registration_tasks.clear()
+        except Exception:
+            pass
+
+        # close the loop (template clients are not meant to run)
+        try:
+            if loop is not None and (not loop.is_running()) and (not loop.is_closed()):
+                loop.close()
+        except Exception:
+            pass
+
+    def _cleanup_template_clients_from_modules(self):
+        """
+        For every module referenced in the DNA, if it currently has `var_name`
+        bound to a different SummonerClient instance (the imported template),
+        clean it up (cancel/drain registrations + close loop).
+        """
+        modules = {entry.get("module") for entry in self._dna_list if isinstance(entry, dict)}
+        modules.discard(None)
+
+        seen_ids: set[int] = set()
+
+        for module_name in modules:
+            try:
+                module = sys.modules.get(module_name) or import_module(module_name)
+            except Exception:
+                continue
+
+            g = getattr(module, "__dict__", {})
+            template = g.get(self._var_name)
+
+            if isinstance(template, SummonerClient) and template is not self:
+                if id(template) in seen_ids:
+                    continue
+                seen_ids.add(id(template))
+                self._cleanup_one_template_client(template, label=f"{module_name}.{self._var_name}")
 
     def _make_from_source(self, entry: dict[str, Any]) -> types.FunctionType:
-        module_name = entry["module"]
-        fn_name     = entry["fn_name"]
+        fn_name = entry["fn_name"]
 
-        # 1) load the real module and bind `self` into it
-        try:
-            module = sys.modules.get(module_name) or import_module(module_name)
-        except ImportError as e:
-            raise ImportError(f"could not import module '{module_name}': {e}")
-        module_globals = module.__dict__
+        module_globals = self._sandbox_globals
         module_globals[self._var_name] = self
 
-        # 2) strip off decorator lines so we only exec the `def` block
+        # strip off decorator lines so we only exec the `def` block
         raw = entry["source"]
         lines = raw.splitlines()
         for idx, line in enumerate(lines):
@@ -195,10 +727,8 @@ class ClientTranslation(SummonerClient):
         else:
             raise RuntimeError(f"Could not find definition for '{fn_name}'")
 
-        # 3) exec that `def` block directly into module.__dict__
-        exec(compile(func_body, filename=f"<{module_name}>", mode="exec"), module_globals)
+        exec(compile(func_body, filename=f"<{self._sandbox_module_name}>", mode="exec"), module_globals)
 
-        # 4) grab the new function object
         fn = module_globals.get(fn_name)
         if not isinstance(fn, types.FunctionType):
             raise RuntimeError(f"Failed to construct function '{fn_name}'")
@@ -215,6 +745,22 @@ class ClientTranslation(SummonerClient):
             decorator(fn)
         finally:
             inspect.getsource = orig
+
+    def initiate_upload_states(self):
+        for entry in self._dna_list:
+            if entry.get("type") != "upload_states":
+                continue
+            fn  = self._make_from_source(entry)
+            dec = self.upload_states()
+            self._apply_with_source_patch(dec, fn, entry["source"])
+
+    def initiate_download_states(self):
+        for entry in self._dna_list:
+            if entry.get("type") != "download_states":
+                continue
+            fn  = self._make_from_source(entry)
+            dec = self.download_states()
+            self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_hooks(self):
         for entry in self._dna_list:
@@ -251,6 +797,12 @@ class ClientTranslation(SummonerClient):
                      )
             self._apply_with_source_patch(dec, fn, entry["source"])
 
+    def initiate_all(self):
+        self.initiate_upload_states()
+        self.initiate_download_states()
+        self.initiate_hooks()
+        self.initiate_receivers()
+        self.initiate_senders()
 
     async def _async_shutdown(self):
         """

@@ -1,0 +1,58 @@
+[
+  {
+    "type": "__context__",
+    "var_name": "agent",
+    "imports": [
+      "from summoner.protocol.process import Node",
+      "from summoner.protocol.triggers import Move",
+      "from typing import *",
+      "import asyncio"
+    ],
+    "globals": {
+      "state": "spell",
+      "tracker": 0,
+      "QUESTIONS": [
+        "What is your name?",
+        "What is the meaning of life?",
+        "Do you like Rust or Python?",
+        "How are you today?"
+      ]
+    },
+    "recipes": {
+      "tracker_lock": "asyncio.Lock()"
+    },
+    "missing": [
+      "Trigger"
+    ]
+  },
+  {
+    "type": "upload_states",
+    "source": "@agent.upload_states()\nasync def upload(msg):\n    global state\n    print(\"[upload]\", state)\n    return state\n",
+    "module": "__main__",
+    "fn_name": "upload"
+  },
+  {
+    "type": "download_states",
+    "source": "@agent.download_states()\nasync def download(possible_state):\n    global state\n    print(\"[download]\", possible_state, state)\n    if set(possible_state) == {Node(\"spell\")}:\n        state = \"spell\"\n    if set(possible_state) == {Node(\"effect\")}:\n        state = \"effect\"\n    print(\"[download] -->\", state)\n",
+    "module": "__main__",
+    "fn_name": "download"
+  },
+  {
+    "type": "receive",
+    "route": "effect --> spell",
+    "priority": [],
+    "source": "@agent.receive(route=\"effect --> spell\")\nasync def receive_response(msg: Union[str, dict]) -> None:\n    global tracker\n    content = msg[\"content\"] if isinstance(msg, dict) else msg\n    print(f\"Received[{tracker}]: {content}\")\n    if content != \"waiting\":\n        async with tracker_lock:\n            if tracker >= 6:\n                await agent.travel_to(host = agent.default_host, port = agent.default_port)\n                tracker = 0\n                return Move(Trigger.ok)\n            else:\n                tracker += 1\n",
+    "module": "__main__",
+    "fn_name": "receive_response"
+  },
+  {
+    "type": "send",
+    "route": "effect",
+    "multi": false,
+    "on_triggers": [],
+    "on_actions": [],
+    "source": "@agent.send(route=\"effect\")\nasync def send_question() -> str:\n    global tracker\n    await asyncio.sleep(2)\n    async with tracker_lock:\n        return QUESTIONS[tracker % len(QUESTIONS)]\n",
+    "module": "__main__",
+    "fn_name": "send_question"
+  }
+]
