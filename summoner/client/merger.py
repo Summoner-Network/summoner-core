@@ -33,6 +33,25 @@ def _resolve_trigger(TriggerCls, name: str):
     raise KeyError(f"Unknown trigger '{name}' for {TriggerCls}")
 
 
+def _resolve_action(ActionCls, name: str):
+    # 1) Try direct attribute match: "MOVE"
+    if hasattr(ActionCls, name):
+        return getattr(ActionCls, name)
+
+    # 2) Try uppercased: "Move" -> "MOVE"
+    up = name.upper()
+    if hasattr(ActionCls, up):
+        return getattr(ActionCls, up)
+
+    # 3) Try matching the underlying class/function name:
+    #    Action.MOVE == Move, where Move.__name__ == "Move"
+    for v in ActionCls.__dict__.values():
+        if getattr(v, "__name__", None) == name:
+            return v
+
+    raise KeyError(f"Unknown action '{name}' for {ActionCls}")
+
+
 class ClientMerger(SummonerClient):
     """
     Merge multiple sources into one client.
@@ -550,7 +569,7 @@ class ClientMerger(SummonerClient):
                         continue
                     fn = self._make_from_source(entry, g, sandbox)
                     on_triggers = {_resolve_trigger(TriggerCls, t) for t in entry.get("on_triggers", [])} or None
-                    on_actions = {getattr(Action, a) for a in entry.get("on_actions", [])} or None
+                    on_actions = {_resolve_action(Action, a) for a in entry.get("on_actions", [])} or None
                     dec = self.send(
                         entry["route"],
                         multi=entry.get("multi", False),
