@@ -22,18 +22,20 @@
     "recipes": {
       "tracker_lock": "asyncio.Lock()"
     },
-    "missing": []
+    "missing": [
+      "Trigger"
+    ]
   },
   {
     "type": "upload_states",
     "source": "@agent.upload_states()\nasync def upload(msg):\n    global state\n    print(\"[upload]\", state)\n    return state\n",
-    "module": "summoner_merge_6f22f9861b08426fae20dbaa04f0f1f9",
+    "module": "question_spell_2",
     "fn_name": "upload"
   },
   {
     "type": "download_states",
     "source": "@agent.download_states()\nasync def download(possible_state):\n    global state\n    print(\"[download]\", possible_state, state)\n    if set(possible_state) == {Node(\"spell\")}:\n        state = \"spell\"\n    if set(possible_state) == {Node(\"effect\")}:\n        state = \"effect\"\n    print(\"[download] -->\", state)\n",
-    "module": "summoner_merge_6f22f9861b08426fae20dbaa04f0f1f9",
+    "module": "question_spell_2",
     "fn_name": "download"
   },
   {
@@ -41,7 +43,7 @@
     "route": "spell --> effect",
     "priority": [],
     "source": "@agent.receive(route=\"spell --> effect\")\nasync def custom_receive(msg: Union[dict,str]) -> None:\n    global is_back\n    msg = (msg[\"content\"] if isinstance(msg, dict) and \"content\" in msg else msg) \n    tag = (\"\\r[From server]\" if isinstance(msg, str) and msg[:len(\"Warning:\")] == \"Warning:\" else \"\\r[Received]\")\n    print(tag, msg, flush=True)\n    if msg == \"/travel\":\n        await agent.travel_to(host = \"testnet.summoner.org\", port = 8888)\n        is_back = True\n        return Move(Trigger.ok)\n    elif msg == \"/quit\":\n        await agent.quit()\n        return None\n    elif msg == \"/go_home\":\n        await agent.travel_to(host = agent.default_host, port = agent.default_port)\n        is_back = True\n        return None\n    print(\"waiting for instructions... \", flush=True)\n",
-    "module": "summoner_merge_7217396540e646cf991481242020f0e7",
+    "module": "question_spell_1",
     "fn_name": "custom_receive"
   },
   {
@@ -49,7 +51,7 @@
     "route": "effect --> spell",
     "priority": [],
     "source": "@agent.receive(route=\"effect --> spell\")\nasync def receive_response(msg: Union[str, dict]) -> None:\n    global tracker\n    content = msg[\"content\"] if isinstance(msg, dict) else msg\n    print(f\"Received[{tracker}]: {content}\")\n    if content != \"waiting\":\n        async with tracker_lock:\n            if tracker >= 6:\n                await agent.travel_to(host = agent.default_host, port = agent.default_port)\n                tracker = 0\n                return Move(Trigger.ok)\n            else:\n                tracker += 1\n",
-    "module": "summoner_merge_6f22f9861b08426fae20dbaa04f0f1f9",
+    "module": "question_spell_2",
     "fn_name": "receive_response"
   },
   {
@@ -59,7 +61,7 @@
     "on_triggers": [],
     "on_actions": [],
     "source": "@agent.send(route=\"spell\")\nasync def send_question() -> str:\n    global is_back\n    if is_back and agent.host == agent.default_host and agent.port == agent.default_port:\n        is_back = False\n        return \"I am back\"\n    else:\n        await asyncio.sleep(0.1)\n",
-    "module": "summoner_merge_7217396540e646cf991481242020f0e7",
+    "module": "question_spell_1",
     "fn_name": "send_question"
   },
   {
@@ -69,7 +71,7 @@
     "on_triggers": [],
     "on_actions": [],
     "source": "@agent.send(route=\"effect\")\nasync def send_question() -> str:\n    global tracker\n    await asyncio.sleep(2)\n    async with tracker_lock:\n        return QUESTIONS[tracker % len(QUESTIONS)]\n",
-    "module": "summoner_merge_6f22f9861b08426fae20dbaa04f0f1f9",
+    "module": "question_spell_2",
     "fn_name": "send_question"
   }
 ]

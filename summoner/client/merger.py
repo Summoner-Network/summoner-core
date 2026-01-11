@@ -275,15 +275,15 @@ class ClientMerger(SummonerClient):
     def _infer_client_var_name(self, client: SummonerClient) -> Optional[str]:
         # Look for a module-global name whose value is exactly `client`
         candidates = []
-        if getattr(client, "_upload_states", None) is not None:
+        if client._upload_states is not None:
             candidates.append(client._upload_states)
-        if getattr(client, "_download_states", None) is not None:
+        if client._download_states is not None:
             candidates.append(client._download_states)
-        for d in getattr(client, "_dna_receivers", []):
+        for d in client._dna_receivers:
             candidates.append(d.get("fn"))
-        for d in getattr(client, "_dna_senders", []):
+        for d in client._dna_senders:
             candidates.append(d.get("fn"))
-        for d in getattr(client, "_dna_hooks", []):
+        for d in client._dna_hooks:
             candidates.append(d.get("fn"))
 
         for fn in candidates:
@@ -365,14 +365,14 @@ class ClientMerger(SummonerClient):
             if src.get("kind") != "client":
                 continue
 
-            var_name = src["var_name"]
-            client = src["client"]
-
-            tasks = list(getattr(client, "_registration_tasks", []) or [])
-            loop = getattr(client, "loop", None)
+            client: SummonerClient = src["client"]
+            var_name: str = src["var_name"]
+            
+            tasks = list(client._registration_tasks or [])
+            loop = client.loop
 
             # Nothing to do.
-            if not tasks and (loop is None or loop.is_closed()):
+            if not tasks and loop.is_closed():
                 continue
 
             # 1) cancel tasks
@@ -527,9 +527,9 @@ class ClientMerger(SummonerClient):
     def initiate_upload_states(self):
         for src in self.sources:
             if src["kind"] == "client":
-                client = src["client"]
-                var_name = src["var_name"]
-                fn = getattr(client, "_upload_states", None)
+                client: SummonerClient = src["client"]
+                var_name: str = src["var_name"]
+                fn = client._upload_states
                 if fn is None:
                     continue
                 fn_clone = self._clone_handler(fn, var_name)
@@ -551,9 +551,9 @@ class ClientMerger(SummonerClient):
     def initiate_download_states(self):
         for src in self.sources:
             if src["kind"] == "client":
-                client = src["client"]
-                var_name = src["var_name"]
-                fn = getattr(client, "_download_states", None)
+                client: SummonerClient = src["client"]
+                var_name: str = src["var_name"]
+                fn = client._download_states
                 if fn is None:
                     continue
                 fn_clone = self._clone_handler(fn, var_name)
@@ -575,9 +575,9 @@ class ClientMerger(SummonerClient):
     def initiate_hooks(self):
         for src in self.sources:
             if src["kind"] == "client":
-                client = src["client"]
-                var_name = src["var_name"]
-                for dna in getattr(client, "_dna_hooks", []):
+                client: SummonerClient = src["client"]
+                var_name: str = src["var_name"]
+                for dna in client._dna_hooks:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         self.hook(dna["direction"], priority=dna["priority"])(fn_clone)
@@ -598,9 +598,9 @@ class ClientMerger(SummonerClient):
     def initiate_receivers(self):
         for src in self.sources:
             if src["kind"] == "client":
-                client = src["client"]
-                var_name = src["var_name"]
-                for dna in getattr(client, "_dna_receivers", []):
+                client: SummonerClient = src["client"]
+                var_name: str = src["var_name"]
+                for dna in client._dna_receivers:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         self.receive(dna["route"], priority=dna["priority"])(fn_clone)
@@ -622,9 +622,9 @@ class ClientMerger(SummonerClient):
     def initiate_senders(self):
         for src in self.sources:
             if src["kind"] == "client":
-                client = src["client"]
-                var_name = src["var_name"]
-                for dna in getattr(client, "_dna_senders", []):
+                client: SummonerClient = src["client"]
+                var_name: str = src["var_name"]
+                for dna in client._dna_senders:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         self.send(
@@ -748,8 +748,8 @@ class ClientTranslation(SummonerClient):
         Best-effort: cancel & await pending registration tasks, then close the client's loop.
         This mirrors the behavior that makes ClientMerger not leak shutdown warnings.
         """
-        regs = list(getattr(client, "_registration_tasks", []) or [])
-        loop = getattr(client, "loop", None)
+        regs = list(client._registration_tasks or [])
+        loop = client.loop
 
         # cancel registrations
         for t in regs:
@@ -910,7 +910,7 @@ class ClientTranslation(SummonerClient):
         super().shutdown()
 
         # 2) wait for decorator register() tasks
-        regs = getattr(self, "_registration_tasks", None) or []
+        regs = self._registration_tasks or []
         if regs:
             for t in regs:
                 t.cancel()
@@ -951,7 +951,7 @@ class ClientTranslation(SummonerClient):
             super().run(*args, **kwargs)
         except KeyboardInterrupt:
             self.logger.info("KeyboardInterrupt caught—cancelling registration tasks…")
-            for task in list(getattr(self, "_registration_tasks", [])):
+            for task in list(self._registration_tasks or []):
                 task.cancel()
             # swallow the exception so we exit cleanly
             return

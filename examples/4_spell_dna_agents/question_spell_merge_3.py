@@ -22,6 +22,6 @@ if __name__ == "__main__":
     parser.add_argument('--config', dest='config_path', required=False, help='The relative path to the config file (JSON) for the client (e.g., --config myproject/client_config.json)')
     args = parser.parse_args()
 
-    save_dna_to_json(agent.dna(include_context=True), "question_spell_merge_1_dna.json")
+    save_dna_to_json(agent.dna(include_context=True), "question_spell_merge_3_dna.json")
 
     agent.run(config_path=args.config_path)
