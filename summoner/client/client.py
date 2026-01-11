@@ -799,7 +799,7 @@ class SummonerClient:
 
         #         # Otherwise unknown
         #         missing.append(name)
-        
+
         # ---- context build (best-effort) ----
         import ast
         import textwrap
@@ -846,7 +846,6 @@ class SummonerClient:
                     if isinstance(n, ast.Name):
                         out.add(n.id)
             return out
-
 
         def _import_line_for(name: str, value: object, g: dict[str, object]) -> str | None:
             """
@@ -914,7 +913,6 @@ class SummonerClient:
 
             return None
 
-
         # Discover dependencies from all handlers
         for fn in handler_fns:
             g = getattr(fn, "__globals__", {})
@@ -965,7 +963,6 @@ class SummonerClient:
 
                 # Otherwise unknown
                 missing.append(name)
-
 
         context_entry = {
             "type": "__context__",

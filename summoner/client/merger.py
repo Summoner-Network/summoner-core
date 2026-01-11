@@ -423,19 +423,50 @@ class ClientMerger(SummonerClient):
         raw = entry["source"]
         lines = raw.splitlines()
 
+        # ---------------------------------------------------------------------
+        # 1) Find the def line for this function, but SKIP decorators.
+        #    Your DNA sources include decorators like "@client.receive(...)".
+        #    Executing those in the sandbox is wrong: it can register handlers,
+        #    or fail because 'client' is not defined there.
+        # ---------------------------------------------------------------------
+        def_idx = None
         for idx, line in enumerate(lines):
             pat = rf"\s*(async\s+)?def\s+{re.escape(fn_name)}\b"
             if re.match(pat, line):
-                func_body = "\n".join(lines[idx:])
+                def_idx = idx
                 break
-        else:
+        if def_idx is None:
             raise RuntimeError(f"Could not find def for '{fn_name}'")
 
+        func_body = "\n".join(lines[def_idx:])
+
+        # ---------------------------------------------------------------------
+        # 2) Ensure rebinding happens in the SAME globals dict used by exec(),
+        #    because fn.__globals__ will be exactly this dict.
+        #
+        #    This is the critical fix for: NameError: name 'viz' is not defined
+        # ---------------------------------------------------------------------
+        # If you store rebind globals on self, use that. Adjust attribute name
+        # if yours differs.
+        rebind = getattr(self, "_rebind_globals", None)
+        if isinstance(rebind, dict) and rebind:
+            # Update in-place so the constructed function sees these names later.
+            g.update(rebind)
+
+        # ---------------------------------------------------------------------
+        # 3) Execute. (Optionally you can ensure builtins exist.)
+        # ---------------------------------------------------------------------
+        if "__builtins__" not in g:
+            g["__builtins__"] = __builtins__
+
         exec(compile(func_body, filename=f"<{sandbox_name}>", mode="exec"), g)
+
         fn = g.get(fn_name)
         if not isinstance(fn, types.FunctionType):
             raise RuntimeError(f"Failed to construct function '{fn_name}'")
+
         return fn
+
 
     # ----------------------------
     # Public replay API
