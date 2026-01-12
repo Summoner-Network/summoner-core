@@ -1,3 +1,31 @@
+"""
+merger.py
+
+This module provides two related utilities:
+
+1) ClientMerger
+   Build a single composite SummonerClient by replaying handlers from multiple sources.
+
+   A "source" can be:
+     - an imported SummonerClient instance (live Python objects), or
+     - a DNA list (already loaded JSON), or
+     - a DNA JSON file path.
+
+   Imported-client sources preserve their original function globals (module-backed),
+   but the client binding (for example the name "agent") is rebound to the merged client.
+
+   DNA sources are reconstructed into an isolated sandbox module per source, then
+   registered onto the merged client via normal decorators.
+
+2) ClientTranslation
+   Reconstruct a fresh SummonerClient from a DNA list, by compiling handler functions
+   from their recorded sources into a sandbox module and then registering them.
+
+Trust model:
+- Both classes execute code from DNA using exec() and eval() (context imports, recipes,
+  and handler bodies). This is intended for trusted DNA (your own agents).
+"""
+
 from importlib import import_module
 from typing import Optional, Any
 from contextlib import suppress
@@ -20,6 +48,15 @@ from summoner.protocol.process import Direction
 
 
 def _resolve_trigger(TriggerCls, name: str):
+    """
+    Resolve a trigger name (string) into a trigger instance from TriggerCls.
+
+    Supported formats:
+    - Enum-style indexing: TriggerCls["ok"]
+    - Attribute access: TriggerCls.ok
+
+    Raises KeyError if the trigger cannot be resolved.
+    """
     # Enum-style: SignalCls["ok"]
     try:
         return TriggerCls[name]
@@ -34,6 +71,17 @@ def _resolve_trigger(TriggerCls, name: str):
 
 
 def _resolve_action(ActionCls, name: str):
+    """
+    Resolve an action name (string) into the corresponding Action entry.
+
+    The DNA representation stores action names as strings. Depending on how actions
+    are serialized, the name can be:
+    - the enum attribute name ("MOVE"),
+    - a mixed-case name ("Move"),
+    - the underlying class name (Move.__name__ == "Move").
+
+    Raises KeyError if the action cannot be resolved.
+    """
     # 1) Try direct attribute match: "MOVE"
     if hasattr(ActionCls, name):
         return getattr(ActionCls, name)
@@ -61,8 +109,20 @@ class ClientMerger(SummonerClient):
       - a DNA list (loaded from JSON)
       - a DNA file path (JSON)
 
-    For imported clients, handlers keep sharing their original module globals.
-    For DNA sources, handlers live in a per-source sandbox module + context globals.
+    Imported-client sources:
+      - handlers keep their original module globals
+      - the original client binding (var_name such as "agent") is rebound to the merged client
+      - optional rebind_globals are injected into handler globals
+
+    DNA sources:
+      - handlers are constructed from recorded source code inside a per-source sandbox module
+      - var_name is bound to the merged client inside that sandbox, so handler code that references
+        "agent" executes against the merged client
+      - optional context (imports/globals/recipes) is applied into the sandbox
+
+    Important:
+    - This file uses exec()/eval() to apply DNA context and compile functions.
+      It assumes DNA is trusted.
     """
 
     def __init__(
@@ -76,12 +136,22 @@ class ClientMerger(SummonerClient):
     ):
         super().__init__(name=name)
 
+        # Globals that should be injected into compiled handler namespaces (DNA) and
+        # into imported handler globals (imported clients).
         self._rebind_globals = dict(rebind_globals or {})
 
+        # Context controls:
+        # - allow_context_imports: execute import lines found in DNA context
+        # - verbose_context_imports: log successes as well as failures
         self._allow_context_imports = allow_context_imports
         self._verbose_context_imports = verbose_context_imports
+
+        # If True, imported template clients are "cleaned up" after extraction:
+        # registration tasks are cancelled/drained and their event loops are closed.
+        # This reduces warnings when importing agent scripts purely as templates.
         self._close_subclients = close_subclients
 
+        # Normalized sources used later by initiate_* replay methods.
         self.sources: list[dict[str, Any]] = []
         self._import_reports: list[dict[str, Any]] = []
 
@@ -97,6 +167,19 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def _normalize_source(self, entry: Any, idx: int) -> dict[str, Any]:
+        """
+        Normalize user-provided source specifications into a canonical dict.
+
+        Accepted inputs:
+        - SummonerClient instance
+        - DNA list (list[dict])
+        - dict that contains one of: {"client"}, {"dna_list"}, {"dna_path"}
+
+        Returns a dict with:
+        - kind: "client" or "dna"
+        - var_name: the name that handler source uses to refer to the client ("agent" by default)
+        - client or dna_entries + sandbox globals, depending on kind
+        """
         # Allow passing a SummonerClient directly
         if isinstance(entry, SummonerClient):
             entry = {"client": entry}
@@ -113,6 +196,7 @@ class ClientMerger(SummonerClient):
             if not isinstance(client, SummonerClient):
                 raise TypeError(f"Entry #{idx} 'client' must be SummonerClient, got {type(client).__name__}")
 
+            # var_name controls which global name will be rebound to the merged client.
             var_name = entry.get("var_name")
             if var_name is None:
                 var_name = self._infer_client_var_name(client) or "agent"
@@ -138,12 +222,17 @@ class ClientMerger(SummonerClient):
         if not isinstance(dna_list, list):
             raise TypeError(f"Entry #{idx} DNA must be a list, got {type(dna_list).__name__}")
 
+        # Optional context header is stored in DNA as the first entry.
         ctx = None
         entries = dna_list
         if entries and isinstance(entries[0], dict) and entries[0].get("type") == "__context__":
             ctx = entries[0]
             entries = entries[1:]
 
+        # Determine var_name binding:
+        # - explicit var_name in entry wins
+        # - else use ctx["var_name"]
+        # - else default to "agent"
         var_name = entry.get("var_name")
         if var_name is None:
             ctx_var = ctx.get("var_name") if isinstance(ctx, dict) else None
@@ -151,15 +240,17 @@ class ClientMerger(SummonerClient):
         if not isinstance(var_name, str):
             raise TypeError(f"Entry #{idx} 'var_name' must be str, got {type(var_name).__name__}")
 
+        # Each DNA source gets its own sandbox module (isolated globals dict).
         sandbox_module_name = f"summoner_merge_{uuid.uuid4().hex}"
         sandbox_module = types.ModuleType(sandbox_module_name)
         sys.modules[sandbox_module_name] = sandbox_module
         g = sandbox_module.__dict__
 
-        # bind the client name used inside handler source to the *merged* client
+        # Bind the client name used inside handler source to the merged client.
+        # This makes `await agent.travel_to(...)` act on the composite client.
         g[var_name] = self
 
-        # apply context (imports/globals/recipes) into that sandbox
+        # Apply context (imports/globals/recipes) into that sandbox.
         report = self._apply_context(ctx, g, label=f"source#{idx}")
         self._import_reports.append(report)
 
@@ -174,6 +265,12 @@ class ClientMerger(SummonerClient):
         }
 
     def _infer_client_var_name(self, client: SummonerClient) -> Optional[str]:
+        """
+        Infer the module-global variable name used by handlers to refer to `client`.
+
+        This is important for imported-client sources, because handler code might
+        reference `agent` (or another name) directly.
+        """
         # Look for a module-global name whose value is exactly `client`
         candidates = []
         if client._upload_states is not None:
@@ -199,6 +296,13 @@ class ClientMerger(SummonerClient):
         return None
 
     def _cancel_and_drain_loop(self, loop: asyncio.AbstractEventLoop, tasks: list[asyncio.Task], *, label: str) -> None:
+        """
+        Best-effort helper to cancel tasks and, if possible, run the loop to process cancellations.
+
+        Note:
+        - If the loop is running, we cannot safely run_until_complete.
+        - This method is conservative and never fails the merge.
+        """
         if not loop or loop.is_closed() or not tasks:
             return
 
@@ -237,31 +341,17 @@ class ClientMerger(SummonerClient):
             except Exception:
                 pass
 
-    # def _shutdown_imported_clients(self) -> None:
-    #     for src in self.sources:
-    #         if src.get("kind") != "client":
-    #             continue
-    #         var_name = src["var_name"]
-    #         client = src["client"]
-
-    #         # cancel registration tasks
-    #         for task in getattr(client, "_registration_tasks", []):
-    #             try:
-    #                 task.cancel()
-    #             except Exception as e:
-    #                 self.logger.warning(f"[{var_name}] Error cancelling registration task: {e}")
-    #         try:
-    #             client._registration_tasks.clear()
-    #         except Exception:
-    #             pass
-
-    #         # close loop
-    #         try:
-    #             client.loop.close()
-    #         except Exception as e:
-    #             self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
-
     def _shutdown_imported_clients(self) -> None:
+        """
+        Imported agent scripts often create a SummonerClient at import-time, which creates an event loop
+        and schedules registration tasks.
+
+        When those scripts are imported only as templates for merging, the template clients should not
+        be left alive (otherwise you tend to get "coroutine was never awaited" warnings).
+
+        This method cancels and drains pending registration tasks on the template client's loop,
+        then closes that loop if it is not running.
+        """
         for src in self.sources:
             if src.get("kind") != "client":
                 continue
@@ -281,7 +371,7 @@ class ClientMerger(SummonerClient):
                 with suppress(Exception):
                     t.cancel()
 
-            # 2) drain tasks on *that* loop so they are actually awaited
+            # 2) drain tasks on that loop so they are actually awaited
             if loop is not None and not loop.is_closed():
                 if loop.is_running():
                     # Can't safely run_until_complete; also shouldn't close a running loop.
@@ -321,12 +411,22 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def _apply_context(self, ctx: Optional[dict], g: dict, *, label: str) -> dict[str, Any]:
+        """
+        Apply a DNA context entry (imports, globals, recipes) into a sandbox globals dict.
+
+        This is best-effort:
+        - import failures are recorded and logged
+        - recipe failures are logged but do not abort merge
+
+        Security note:
+        - This executes untrusted code if ctx is untrusted.
+        """
         report = {"label": label, "succeeded": [], "failed": [], "skipped": []}
 
         if not isinstance(ctx, dict):
             return report
 
-        # imports (safe)
+        # imports (safe-ish for trusted DNA)
         for line in (ctx.get("imports") or []):
             if not isinstance(line, str) or not line.strip():
                 continue
@@ -344,14 +444,14 @@ class ClientMerger(SummonerClient):
                 report["failed"].append((line, f"{type(e).__name__}: {e}"))
                 self.logger.warning(f"[merge ctx:{label}] import failed: {line!r} ({type(e).__name__}: {e})")
 
-        # plain globals
+        # plain globals (already JSON-friendly)
         globs = ctx.get("globals") or {}
         if isinstance(globs, dict):
             for k, v in globs.items():
                 if isinstance(k, str):
                     g.setdefault(k, v)
 
-        # recipes
+        # recipes (evaluated inside the sandbox namespace)
         recipes = ctx.get("recipes") or {}
         if isinstance(recipes, dict):
             for k, expr in recipes.items():
@@ -369,6 +469,12 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def _apply_with_source_patch(self, decorator, fn, source: str):
+        """
+        The base decorators record handler source using inspect.getsource(fn).
+        When functions are constructed from DNA via exec(), inspect.getsource no longer works.
+
+        This helper temporarily patches inspect.getsource so the decorator can store the DNA text.
+        """
         orig = inspect.getsource
         inspect.getsource = lambda o: source
         try:
@@ -381,6 +487,17 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def _clone_handler(self, fn: types.FunctionType, original_name: str) -> types.FunctionType:
+        """
+        Clone a function object while keeping its original globals dict.
+
+        Behavior:
+        - Mutates fn.__globals__ in-place to rebind original_name (for example "agent") to the merged client.
+        - Injects rebind_globals into the same globals dict.
+        - Creates a new function object using the original code object and closure.
+
+        This approach preserves the module-backed environment of imported clients,
+        but it does mean imported handler globals are modified.
+        """
         g = fn.__globals__
 
         # rebind the client variable name (agent/client/etc)
@@ -418,15 +535,23 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def _make_from_source(self, entry: dict[str, Any], g: dict, sandbox_name: str) -> types.FunctionType:
+        """
+        Build a function object from a DNA entry by executing the function body inside a sandbox globals dict.
+
+        Important:
+        - DNA sources typically include decorator lines (for example "@agent.receive(...)").
+          We skip all decorators and only exec the "def ..." block, otherwise replay would accidentally
+          register handlers while compiling.
+
+        - rebind_globals is injected into g before exec so any required runtime objects
+          (for example viz, Trigger, OBJECTS) are visible to the compiled function.
+        """
         fn_name = entry["fn_name"]
         raw = entry["source"]
         lines = raw.splitlines()
 
         # ---------------------------------------------------------------------
         # 1) Find the def line for this function, but SKIP decorators.
-        #    Your DNA sources include decorators like "@client.receive(...)".
-        #    Executing those in the sandbox is wrong: it can register handlers,
-        #    or fail because 'client' is not defined there.
         # ---------------------------------------------------------------------
         def_idx = None
         for idx, line in enumerate(lines):
@@ -440,20 +565,14 @@ class ClientMerger(SummonerClient):
         func_body = "\n".join(lines[def_idx:])
 
         # ---------------------------------------------------------------------
-        # 2) Ensure rebinding happens in the SAME globals dict used by exec(),
-        #    because fn.__globals__ will be exactly this dict.
-        #
-        #    This is the critical fix for: NameError: name 'viz' is not defined
+        # 2) Ensure rebinding happens in the SAME globals dict used by exec().
         # ---------------------------------------------------------------------
-        # If you store rebind globals on self, use that. Adjust attribute name
-        # if yours differs.
         rebind = self._rebind_globals
         if isinstance(rebind, dict) and rebind:
-            # Update in-place so the constructed function sees these names later.
             g.update(rebind)
 
         # ---------------------------------------------------------------------
-        # 3) Execute. (Optionally you can ensure builtins exist.)
+        # 3) Execute and retrieve the resulting function object.
         # ---------------------------------------------------------------------
         if "__builtins__" not in g:
             g["__builtins__"] = __builtins__
@@ -472,6 +591,7 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     def initiate_upload_states(self):
+        """Replay @upload_states from every source onto the merged client."""
         for src in self.sources:
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
@@ -496,6 +616,7 @@ class ClientMerger(SummonerClient):
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_download_states(self):
+        """Replay @download_states from every source onto the merged client."""
         for src in self.sources:
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
@@ -520,6 +641,7 @@ class ClientMerger(SummonerClient):
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_hooks(self):
+        """Replay @hook(Direction, priority=...) from every source onto the merged client."""
         for src in self.sources:
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
@@ -543,6 +665,7 @@ class ClientMerger(SummonerClient):
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_receivers(self):
+        """Replay @receive(route, priority=...) from every source onto the merged client."""
         for src in self.sources:
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
@@ -567,6 +690,12 @@ class ClientMerger(SummonerClient):
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_senders(self):
+        """
+        Replay @send(route, multi, on_triggers, on_actions) from every source onto the merged client.
+
+        Imported-client sources carry actual trigger/action objects.
+        DNA sources carry strings, which must be resolved using TriggerCls and Action.
+        """
         for src in self.sources:
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
@@ -589,9 +718,9 @@ class ClientMerger(SummonerClient):
                 g = src["globals"]
                 sandbox = src["sandbox_name"]
 
+                # Triggers: prefer a Trigger class provided by sandbox context; otherwise load defaults.
                 TriggerCls = g.get("Trigger")
                 if TriggerCls is None:
-                    # loads TRIGGERS from the directory of the running script (via sys.argv[0] in your code)
                     TriggerCls = load_triggers()
 
                 for entry in src["dna_entries"]:
@@ -609,11 +738,16 @@ class ClientMerger(SummonerClient):
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_all(self):
+        """
+        Replay all supported handler types in a standard order.
+        This should be called before run().
+        """
         self.initiate_upload_states()
         self.initiate_download_states()
         self.initiate_hooks()
         self.initiate_receivers()
         self.initiate_senders()
+
 
 class ClientTranslation(SummonerClient):
     """
@@ -684,6 +818,11 @@ class ClientTranslation(SummonerClient):
         self._cleanup_template_clients_from_modules()
 
     def _apply_context(self):
+        """
+        Apply optional __context__ entry into the translation sandbox.
+
+        This is best-effort and intended for trusted DNA.
+        """
         if not isinstance(self._context, dict):
             return
 
@@ -723,8 +862,12 @@ class ClientTranslation(SummonerClient):
 
     def _cleanup_one_template_client(self, client: SummonerClient, label: str):
         """
-        Best-effort: cancel & await pending registration tasks, then close the client's loop.
-        This mirrors the behavior that makes ClientMerger not leak shutdown warnings.
+        Best-effort: cancel and await pending registration tasks, then close the client's loop.
+
+        This is relevant when a DNA entry references a module that, if imported,
+        constructs a template SummonerClient at module import-time.
+
+        We do not want those template clients to remain alive when using translation.
         """
         regs = list(client._registration_tasks or [])
         loop = client.loop
@@ -784,6 +927,11 @@ class ClientTranslation(SummonerClient):
                 self._cleanup_one_template_client(template, label=f"{module_name}.{self._var_name}")
 
     def _make_from_source(self, entry: dict[str, Any]) -> types.FunctionType:
+        """
+        Compile a handler function from its DNA 'source' into the translation sandbox globals.
+
+        Decorator lines are stripped: only the function definition block is executed.
+        """
         fn_name = entry["fn_name"]
 
         module_globals = self._sandbox_globals
@@ -816,8 +964,8 @@ class ClientTranslation(SummonerClient):
 
     def _apply_with_source_patch(self, decorator, fn, source: str):
         """
-        Temporarily override inspect.getsource so that
-        SummonerClient's decorator can record the right text.
+        Temporarily override inspect.getsource so that SummonerClient decorators
+        record the original DNA source text.
         """
         orig = inspect.getsource
         inspect.getsource = lambda o: source
@@ -827,6 +975,7 @@ class ClientTranslation(SummonerClient):
             inspect.getsource = orig
 
     def initiate_upload_states(self):
+        """Replay @upload_states from DNA onto this translated client."""
         for entry in self._dna_list:
             if entry.get("type") != "upload_states":
                 continue
@@ -835,6 +984,7 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_download_states(self):
+        """Replay @download_states from DNA onto this translated client."""
         for entry in self._dna_list:
             if entry.get("type") != "download_states":
                 continue
@@ -843,6 +993,7 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_hooks(self):
+        """Replay @hook from DNA onto this translated client."""
         for entry in self._dna_list:
             if entry.get("type") != "hook":
                 continue
@@ -854,6 +1005,7 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_receivers(self):
+        """Replay @receive from DNA onto this translated client."""
         for entry in self._dna_list:
             if entry.get("type") != "receive":
                 continue
@@ -865,6 +1017,7 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_senders(self):
+        """Replay @send from DNA onto this translated client, resolving triggers/actions from names."""
         g = self._sandbox_globals
 
         # Ensure rebind globals are visible BEFORE resolving triggers/actions.
@@ -890,6 +1043,7 @@ class ClientTranslation(SummonerClient):
             self._apply_with_source_patch(dec, fn, entry["source"])
 
     def initiate_all(self):
+        """Replay all handler types from DNA in a standard order. Call this before run()."""
         self.initiate_upload_states()
         self.initiate_download_states()
         self.initiate_hooks()
@@ -898,10 +1052,13 @@ class ClientTranslation(SummonerClient):
 
     async def _async_shutdown(self):
         """
-        1) call the base-class shutdown to cancel all tasks
-        2) await any pending decorator-registration coroutines
-        3) await all active handler/worker tasks
-        4) stop the loop so run_client returns
+        Async shutdown path used by SIGINT/SIGTERM and quit().
+
+        Steps:
+        1) cancel everything (base shutdown)
+        2) cancel and await pending decorator-registration coroutines
+        3) await in-flight handler/worker tasks
+        4) stop the loop so run_until_complete can return
         """
         # 1) cancel everything
         super().shutdown()
@@ -914,7 +1071,7 @@ class ClientTranslation(SummonerClient):
             await asyncio.gather(*regs, return_exceptions=True)
             regs.clear()
 
-        # 3) wait for in-flight handlers & workers
+        # 3) wait for in-flight handlers and workers
         await self._wait_for_tasks_to_finish()
 
         # 4) stop the loop so run_client's run_until_complete can finish
@@ -922,8 +1079,11 @@ class ClientTranslation(SummonerClient):
 
     def shutdown(self):
         """
-        Overrides the base-class SIGINT/SIGTERM handler
-        to schedule _async_shutdown() instead of blocking.
+        Overrides the base-class SIGINT/SIGTERM handler.
+
+        The base SummonerClient.shutdown() cancels tasks, but does not await them.
+        In translation mode we want a clean exit without pending-task warnings,
+        so we schedule an async shutdown coroutine instead.
         """
         self.logger.info("Client is shutting down…")
         try:
@@ -934,6 +1094,11 @@ class ClientTranslation(SummonerClient):
             pass
     
     async def quit(self):
+        """
+        Quit the translated client:
+        - set _quit so run_client exits
+        - run the same cleanup as Ctrl+C
+        """
         # 1) run the base logic so run_client() will break out on _quit
         await super().quit()
         # 2) now run the exact same cleanup we do on SIGINT
@@ -947,9 +1112,8 @@ class ClientTranslation(SummonerClient):
         try:
             super().run(*args, **kwargs)
         except KeyboardInterrupt:
-            self.logger.info("KeyboardInterrupt caught—cancelling registration tasks…")
+            self.logger.info("KeyboardInterrupt caught-cancelling registration tasks…")
             for task in list(self._registration_tasks or []):
                 task.cancel()
             # swallow the exception so we exit cleanly
             return
-

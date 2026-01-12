@@ -69,3 +69,33 @@ def load_config(config_path: Optional[str], debug: bool = False) -> dict[str, An
             print(f"[DEBUG] Unexpected error loading {config_path}: {e}")
 
     return {}
+
+def is_jsonable(value: Any) -> bool:
+    """
+    Return True if `value` can be serialized by `json.dumps`.
+
+    This is a practical predicate for deciding whether a value can be embedded
+    into JSON configuration, cached metadata, or other JSON-based artifacts.
+
+    Notes
+    -----
+    - Being JSON-serializable is not the same as being *meaningfully* serializable.
+      For example, large lists or nested structures may be serializable but still
+      undesirable to inline.
+    - This uses Python's default `json.dumps` behavior (no custom encoder).
+
+    Parameters
+    ----------
+    value:
+        Any Python value.
+
+    Returns
+    -------
+    bool:
+        True if `json.dumps(value)` succeeds, False otherwise.
+    """
+    try:
+        json.dumps(value)
+        return True
+    except Exception:
+        return False

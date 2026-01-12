@@ -21,6 +21,11 @@ if target_path not in sys.path:
 
 from summoner.utils import (
     load_config,
+    is_jsonable,
+    extract_annotation_identifiers,
+    resolve_import_statement,
+    get_callable_source,
+    rebuild_expression_for,
     )
 from summoner.logger import (
     get_logger, 
@@ -416,7 +421,7 @@ class SummonerClient:
                 "fn": fn,
                 "route": route,
                 "priority": tuple_priority,
-                "source": inspect.getsource(fn),  # optional, for text serialization
+                "source": inspect.getsource(fn),  # for text serialization
             })
 
             # ----[ Registration Code ]----
@@ -540,613 +545,158 @@ class SummonerClient:
 
     # ==== DNA PROCESSING ====
 
-    # def dna(self) -> str:
-    #     """
-    #     Serialize this client's handlers into a JSON string.
-    #     Each entry captures:
-    #       - type: "receive" | "send" | "hook"
-    #       - decorator parameters (route, priority, etc.)
-    #       - source: the full text of the async function
-    #     """
-    #     entries = []
+    def _iter_registered_handler_functions(self):
+        """
+        Yield all registered handler functions attached to this client.
 
-    #     # 1) Receivers
-    #     for dna in self._dna_receivers:
-    #         entries.append({
-    #             "type":    "receive",
-    #             "route":   dna["route"],
-    #             "priority": dna["priority"],
-    #             "source":  inspect.getsource(dna["fn"]),
-    #             "module":   dna["fn"].__module__,
-    #             "fn_name":  dna["fn"].__name__,
-    #         })
+        This provides a single, consistent place to enumerate handlers that may be
+        referenced for source capture, binding-name inference, and context analysis.
 
-    #     # 2) Senders
-    #     for dna in self._dna_senders:
-    #         entries.append({
-    #             "type":        "send",
-    #             "route":       dna["route"],
-    #             "multi":       dna["multi"],
-    #             "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
-    #             "on_actions":  [a.__name__ for a in (dna["on_actions"] or [])],
-    #             "source":      inspect.getsource(dna["fn"]),
-    #             "module":   dna["fn"].__module__,
-    #             "fn_name":  dna["fn"].__name__,
-    #         })
+        Yields
+        ------
+        Callable
+            Each handler function registered on this client (upload/download, receivers,
+            senders, hooks). Entries with missing/None functions are skipped.
+        """
+        if self._upload_states is not None:
+            yield self._upload_states
 
-    #     # 3) Hooks
-    #     for dna in self._dna_hooks:
-    #         entries.append({
-    #             "type":     "hook",
-    #             "direction": dna["direction"].name,
-    #             "priority": dna["priority"],
-    #             "source":   inspect.getsource(dna["fn"]),
-    #             "module":   dna["fn"].__module__,
-    #             "fn_name":  dna["fn"].__name__,
-    #         })
+        if self._download_states is not None:
+            yield self._download_states
 
-    #     return json.dumps(entries)
+        for d in self._dna_receivers:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
 
-    # def dna(self, include_context: bool = False) -> str:
-    #     """
-    #     Serialize this client's handlers into a JSON string.
+        for d in self._dna_senders:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
 
-    #     If include_context=True, also add a first entry of type "__context__"
-    #     containing best-effort imports + cloneable globals + simple recipes
-    #     to reduce hardcoded boilerplate in clone scripts.
-    #     """
-    #     import builtins
-    #     import types as _types
-    #     import json as _json
+        for d in self._dna_hooks:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
 
-    #     def _infer_var_name() -> str:
-    #         # try to find the module-global name that points to this client instance
-    #         try:
-    #             for k, v in getattr(self, "__dict__", {}).get("__globals__", {}).items():
-    #                 if v is self:
-    #                     return k
-    #         except Exception:
-    #             pass
 
-    #         # better: look at any decorated handler globals (they share module globals)
-    #         handlers = []
-    #         for d in self._dna_receivers:
-    #             handlers.append(d["fn"])
-    #         for d in self._dna_senders:
-    #             handlers.append(d["fn"])
-    #         for d in self._dna_hooks:
-    #             handlers.append(d["fn"])
+    def _infer_client_binding_name(self) -> str:
+        """
+        Infer the module-global variable name that refers to this client instance.
 
-    #         for fn in handlers:
-    #             try:
-    #                 for k, v in fn.__globals__.items():
-    #                     if v is self:
-    #                         return k
-    #             except Exception:
-    #                 continue
-    #         return "agent"
+        Some user-authored handler source code references the client through a global
+        name (commonly "agent"), for example:
+            await agent.travel_to(...)
 
-    #     def _jsonable(v) -> bool:
-    #         try:
-    #             _json.dumps(v)
-    #             return True
-    #         except Exception:
-    #             return False
+        When rehydrating such code from source, the sandbox globals must bind the same
+        name to the reconstructed client instance. This method attempts to recover
+        that binding name by scanning the globals dict of registered handlers.
 
-    #     # Collect handler FNs used for dependency discovery
-    #     handler_fns = []
-    #     if self._upload_states is not None:
-    #         handler_fns.append(self._upload_states)
-    #     if self._download_states is not None:
-    #         handler_fns.append(self._download_states)
-    #     for d in self._dna_receivers:
-    #         handler_fns.append(d["fn"])
-    #     for d in self._dna_senders:
-    #         handler_fns.append(d["fn"])
-    #     for d in self._dna_hooks:
-    #         handler_fns.append(d["fn"])
+        Returns
+        -------
+        str
+            The inferred binding name if found; otherwise "agent".
+        """
+        for fn in self._iter_registered_handler_functions():
+            g = getattr(fn, "__globals__", None)
+            if not isinstance(g, dict):
+                continue
 
-    #     # Normal DNA entries (existing behavior)
-    #     entries: list[dict] = []
+            # Look for any global variable that points exactly to this client instance.
+            for k, v in g.items():
+                if v is self and isinstance(k, str):
+                    return k
 
-    #     if self._dna_upload_states is not None:
-    #         fn = self._dna_upload_states["fn"]
-    #         entries.append({
-    #             "type":   "upload_states",
-    #             "source": self._dna_upload_states.get("source") or inspect.getsource(fn),
-    #             "module": fn.__module__,
-    #             "fn_name": fn.__name__,
-    #         })
+        return "agent"
 
-    #     if self._dna_download_states is not None:
-    #         fn = self._dna_download_states["fn"]
-    #         entries.append({
-    #             "type":   "download_states",
-    #             "source": self._dna_download_states.get("source") or inspect.getsource(fn),
-    #             "module": fn.__module__,
-    #             "fn_name": fn.__name__,
-    #         })
-
-    #     for dna in self._dna_receivers:
-    #         entries.append({
-    #             "type":    "receive",
-    #             "route":   dna["route"],
-    #             "priority": dna["priority"],
-    #             "source":  dna.get("source") or inspect.getsource(dna["fn"]),
-    #             "module":  dna["fn"].__module__,
-    #             "fn_name": dna["fn"].__name__,
-    #         })
-
-    #     for dna in self._dna_senders:
-    #         entries.append({
-    #             "type":        "send",
-    #             "route":       dna["route"],
-    #             "multi":       dna["multi"],
-    #             "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
-    #             "on_actions":  [a.__name__ for a in (dna["on_actions"] or [])],
-    #             "source":      dna.get("source") or inspect.getsource(dna["fn"]),
-    #             "module":      dna["fn"].__module__,
-    #             "fn_name":     dna["fn"].__name__,
-    #         })
-
-    #     for dna in self._dna_hooks:
-    #         entries.append({
-    #             "type":      "hook",
-    #             "direction": dna["direction"].name,
-    #             "priority":  dna["priority"],
-    #             "source":    dna.get("source") or inspect.getsource(dna["fn"]),
-    #             "module":    dna["fn"].__module__,
-    #             "fn_name":   dna["fn"].__name__,
-    #         })
-
-    #     if not include_context:
-    #         return _json.dumps(entries)
-
-    #     # ---- context build (best-effort) ----
-
-    #     # Names we will NOT treat as cloneable globals
-    #     inferred_var_name = _infer_var_name()
-    #     excluded_names = {inferred_var_name, "__builtins__"}
-
-    #     # recipes we know how to rebuild cheaply
-    #     recipes: dict[str, str] = {}
-    #     globals_out: dict[str, object] = {}
-    #     imports_out: set[str] = set()
-    #     missing: list[str] = []
-
-    #     # Always include typing star to make annotation evaluation easy during validation
-    #     imports_out.add("from typing import *")
-
-    #     # lock detection without relying on exact class name
-    #     try:
-    #         import asyncio as _asyncio
-    #         _lock_type = type(_asyncio.Lock())
-    #     except Exception:
-    #         _asyncio = None
-    #         _lock_type = None
-
-    #     # ---- context build (best-effort) ----
-    #     import ast
-    #     import textwrap
-    #     from pathlib import Path
-
-    #     known_modules: set[str] = set()
-
-    #     def _annotation_names_from_source(src: str) -> set[str]:
-    #         """
-    #         Best-effort: extract Name identifiers used in arg/return annotations
-    #         so annotation-only deps (ex: -> Event) get picked up.
-    #         """
-    #         out: set[str] = set()
-    #         try:
-    #             tree = ast.parse(textwrap.dedent(src))
-    #         except Exception:
-    #             return out
-
-    #         # Find first (async) function def in that snippet
-    #         fn_node = None
-    #         for node in tree.body:
-    #             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-    #                 fn_node = node
-    #                 break
-    #         if fn_node is None:
-    #             return out
-
-    #         ann_nodes = []
-    #         for a in getattr(fn_node.args, "args", []):
-    #             if a.annotation is not None:
-    #                 ann_nodes.append(a.annotation)
-    #         for a in getattr(fn_node.args, "kwonlyargs", []):
-    #             if a.annotation is not None:
-    #                 ann_nodes.append(a.annotation)
-    #         if getattr(fn_node.args, "vararg", None) is not None and fn_node.args.vararg.annotation is not None:
-    #             ann_nodes.append(fn_node.args.vararg.annotation)
-    #         if getattr(fn_node.args, "kwarg", None) is not None and fn_node.args.kwarg.annotation is not None:
-    #             ann_nodes.append(fn_node.args.kwarg.annotation)
-    #         if fn_node.returns is not None:
-    #             ann_nodes.append(fn_node.returns)
-
-    #         for ann in ann_nodes:
-    #             for n in ast.walk(ann):
-    #                 if isinstance(n, ast.Name):
-    #                     out.add(n.id)
-    #         return out
-
-    #     def _import_line_for(name: str, value: object, g: dict[str, object]) -> str | None:
-    #         """
-    #         More general than before:
-    #         - still handles modules
-    #         - still handles exported functions/classes
-    #         - additionally handles exported constants/type-aliases (ex: Event)
-    #         by checking module.<name> is value
-    #         - avoids emitting 'from __main__ import X' by rewriting __main__ to file stem
-    #         """
-    #         # Modules are always importable
-    #         if isinstance(value, _types.ModuleType):
-    #             mod = value.__name__
-    #             known_modules.add(mod)
-    #             leaf = mod.split(".")[-1]
-    #             if name == leaf:
-    #                 return f"import {mod}"
-    #             return f"import {mod} as {name}"
-
-    #         # Candidate module to import from
-    #         mod = getattr(value, "__module__", None)
-
-    #         # If the object says "__main__", rewrite using the defining file name
-    #         if mod == "__main__":
-    #             file = g.get("__file__")
-    #             if isinstance(file, str) and file.endswith(".py"):
-    #                 mod = Path(file).stem  # ex: agent_p1.py -> "agent_p1"
-
-    #         if not isinstance(mod, str) or mod == "builtins":
-    #             # We can't infer a stable import origin
-    #             mod = None
-
-    #         from importlib import import_module
-
-    #         # 1) If we have a module candidate, try "from mod import <name>"
-    #         if mod is not None:
-    #             try:
-    #                 m = import_module(mod)
-    #                 known_modules.add(mod)
-    #                 if getattr(m, name, None) is value:
-    #                     return f"from {mod} import {name}"
-    #             except Exception:
-    #                 pass
-
-    #             # Also try "from mod import <value.__name__>" for functions/classes/etc
-    #             obj = getattr(value, "__name__", None)
-    #             if isinstance(obj, str):
-    #                 try:
-    #                     m = import_module(mod)
-    #                     if getattr(m, obj, None) is value:
-    #                         if name == obj:
-    #                             return f"from {mod} import {obj}"
-    #                         return f"from {mod} import {obj} as {name}"
-    #                 except Exception:
-    #                     pass
-
-    #         # 2) Fallback: try modules we've already seen (Move/Stay/Test often reveals triggers module)
-    #         for km in tuple(known_modules):
-    #             try:
-    #                 m = import_module(km)
-    #                 if getattr(m, name, None) is value:
-    #                     return f"from {km} import {name}"
-    #             except Exception:
-    #                 continue
-
-    #         return None
-
-    #     # Discover dependencies from all handlers
-    #     for fn in handler_fns:
-    #         g = getattr(fn, "__globals__", {})
-
-    #         # names used in bytecode
-    #         names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
-
-    #         # plus names used only in annotations (best-effort)
-    #         try:
-    #             src = inspect.getsource(fn)
-    #             names_to_scan |= _annotation_names_from_source(src)
-    #         except Exception:
-    #             pass
-
-    #         for name in names_to_scan:
-    #             if name in excluded_names:
-    #                 continue
-    #             if name in builtins.__dict__:
-    #                 continue
-    #             if name not in g:
-    #                 continue
-
-    #             value = g[name]
-
-    #             # Skip binding the client itself
-    #             if value is self:
-    #                 continue
-    #             if isinstance(value, SummonerClient):
-    #                 missing.append(name)
-    #                 continue
-
-    #             # Known rebuildable: asyncio locks
-    #             if _lock_type is not None and isinstance(value, _lock_type):
-    #                 imports_out.add("import asyncio")
-    #                 recipes.setdefault(name, "asyncio.Lock()")
-    #                 continue
-
-    #             # Modules / exported objects / exported constants -> imports
-    #             line = _import_line_for(name, value, g)
-    #             if line is not None:
-    #                 imports_out.add(line)
-    #                 continue
-
-    #             # JSON-able constants -> globals
-    #             if _jsonable(value):
-    #                 globals_out.setdefault(name, value)
-    #                 continue
-
-    #             # Otherwise unknown
-    #             missing.append(name)
-
-    #     context_entry = {
-    #         "type": "__context__",
-    #         "var_name": inferred_var_name,
-    #         "imports": sorted(imports_out),
-    #         "globals": globals_out,
-    #         "recipes": recipes,
-    #         "missing": sorted(set(missing)),
-    #     }
-
-    #     return _json.dumps([context_entry] + entries)
 
     def dna(self, include_context: bool = False) -> str:
         """
-        Serialize this client's handlers into a JSON string.
+        Serialize this client's *registered behavior* into a JSON string (“DNA”).
 
-        If include_context=True, also add a first entry of type "__context__"
-        containing best-effort imports + cloneable globals + simple recipes
-        to reduce hardcoded boilerplate in clone scripts.
+        The DNA output is intended for:
+        - cloning a client from data (rehydrating handlers from their sources), and
+        - merging multiple clients into a single composite client (ClientMerger).
 
-        Design principle: the produced DNA should be portable.
-        In particular, we do NOT emit imports from '__main__' because that is not stable.
-        Those objects should appear in 'missing' and be provided by rebind_globals
-        (the "child has its own mitochondria" model).
+        Output format
+        -------------
+        The returned JSON string encodes a list[dict]. Each dict is a *DNA entry*.
+
+        1) If include_context=False (default):
+        The list contains only handler entries, in a stable order:
+            - upload_states
+            - download_states
+            - receive (one entry per @receive)
+            - send    (one entry per @send)
+            - hook    (one entry per @hook)
+
+        2) If include_context=True:
+        The list begins with a special context header entry of type "__context__",
+        followed by the same handler entries as above.
+
+        The context header is a best-effort portability layer:
+        - var_name: preferred global name of this client instance in handler sources
+            (commonly "agent").
+        - imports: import statements that are safe and stable to replay.
+        - globals: JSON-serializable constants referenced by handlers (e.g. QUESTIONS).
+        - recipes: conservative reconstruction snippets for some common objects
+            (e.g. asyncio.Lock()).
+        - missing: names referenced by handlers that cannot be safely imported
+            or serialized (must be provided explicitly when rehydrating).
+
+        Portability rule ("child has its own mitochondria")
+        ---------------------------------------------------
+        The produced DNA should remain portable across environments. In particular:
+        - We do NOT emit imports from '__main__' (not stable across executions).
+        - Such dependencies should appear in 'missing' and be provided via a
+        rebinding mechanism when evaluating sources.
+
+        Notes
+        -----
+        - This function captures decorated handlers and their source code.
+        - Flow construction (flow.activate, arrow styles, triggers enum creation)
+        is not captured here unless it is referenced through decorated sources.
         """
         import builtins
-        import types as _types
-        import json as _json
-        import inspect
-        import ast
-        import textwrap
-        from pathlib import Path
 
-        # Optional: used for recipe inference
-        try:
-            from summoner.protocol.process import Node as _Node
-        except Exception:
-            _Node = None
+        # Collect handler functions once and reuse.
+        handler_fns = list(self._iter_registered_handler_functions())
 
-        # ---- helpers ------------------------------------------------------------
-
-        def _best_source(fn, override: str | None = None) -> str:
-            if isinstance(override, str) and override.strip():
-                return override
-            try:
-                return inspect.getsource(fn)
-            except Exception:
-                # If your code attaches a source fallback, keep using it.
-                src = getattr(fn, "__dna_source__", None)
-                if isinstance(src, str) and src.strip():
-                    return src
-                # Last resort: still produce something executable
-                name = getattr(fn, "__name__", "handler")
-                return f"async def {name}(*args, **kwargs):\n    raise RuntimeError('source unavailable')\n"
-
-        def _infer_var_name() -> str:
-            # try to find the module-global name that points to this client instance
-            try:
-                for k, v in getattr(self, "__dict__", {}).get("__globals__", {}).items():
-                    if v is self:
-                        return k
-            except Exception:
-                pass
-
-            # look at any decorated handler globals (they share module globals)
-            handlers = []
-            if getattr(self, "_upload_states", None) is not None:
-                handlers.append(self._upload_states)
-            if getattr(self, "_download_states", None) is not None:
-                handlers.append(self._download_states)
-            for d in getattr(self, "_dna_receivers", []) or []:
-                handlers.append(d.get("fn"))
-            for d in getattr(self, "_dna_senders", []) or []:
-                handlers.append(d.get("fn"))
-            for d in getattr(self, "_dna_hooks", []) or []:
-                handlers.append(d.get("fn"))
-
-            for fn in handlers:
-                if fn is None:
-                    continue
-                try:
-                    for k, v in fn.__globals__.items():
-                        if v is self:
-                            return k
-                except Exception:
-                    continue
-            return "agent"
-
-        def _jsonable(v) -> bool:
-            try:
-                _json.dumps(v)
-                return True
-            except Exception:
-                return False
-
-        def _annotation_names_from_source(src: str) -> set[str]:
-            """
-            Best-effort: extract Name identifiers used in arg/return annotations.
-            This is a fallback only; prefer fn.__annotations__ (more robust).
-            """
-            out: set[str] = set()
-            try:
-                tree = ast.parse(textwrap.dedent(src))
-            except Exception:
-                return out
-
-            fn_node = None
-            for node in tree.body:
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    fn_node = node
-                    break
-            if fn_node is None:
-                return out
-
-            ann_nodes = []
-            for a in getattr(fn_node.args, "args", []):
-                if a.annotation is not None:
-                    ann_nodes.append(a.annotation)
-            for a in getattr(fn_node.args, "kwonlyargs", []):
-                if a.annotation is not None:
-                    ann_nodes.append(a.annotation)
-            if getattr(fn_node.args, "vararg", None) is not None and fn_node.args.vararg.annotation is not None:
-                ann_nodes.append(fn_node.args.vararg.annotation)
-            if getattr(fn_node.args, "kwarg", None) is not None and fn_node.args.kwarg.annotation is not None:
-                ann_nodes.append(fn_node.args.kwarg.annotation)
-            if fn_node.returns is not None:
-                ann_nodes.append(fn_node.returns)
-
-            for ann in ann_nodes:
-                for n in ast.walk(ann):
-                    if isinstance(n, ast.Name):
-                        out.add(n.id)
-            return out
-
-        def _recipe_for_value(name: str, value: object) -> str | None:
-            """
-            Try to produce a safe-ish rebuild recipe for common deterministic objects.
-            This is intentionally conservative: only emit recipes we are confident about.
-            """
-            # Path -> Path("...")
-            if isinstance(value, Path):
-                return f'Path({value.as_posix()!r})'
-
-            # set/list/tuple of Node -> set(Node(x) for x in [...])
-            if _Node is not None:
-                if isinstance(value, (set, frozenset, list, tuple)):
-                    elems = list(value)
-                    if elems and all(isinstance(e, _Node) for e in elems):
-                        labels = sorted({str(e) for e in elems})
-                        # deterministic reconstruction
-                        return f"set(_Node(x) for x in {labels!r})"
-
-            return None
-
-        def _import_line_for(name: str, value: object, g: dict[str, object], known_modules: set[str]) -> str | None:
-            """
-            Produce an import line when we can.
-            Rules:
-            - Modules are importable.
-            - Exported objects/constants are importable if module.<name> is value.
-            - NEVER emit imports from '__main__' (not portable).
-            """
-            from importlib import import_module
-
-            # Modules are always importable
-            if isinstance(value, _types.ModuleType):
-                mod = value.__name__
-                known_modules.add(mod)
-                leaf = mod.split(".")[-1]
-                if name == leaf:
-                    return f"import {mod}"
-                return f"import {mod} as {name}"
-
-            mod = getattr(value, "__module__", None)
-            if mod == "__main__":
-                # Not stable. Force rebind_globals instead.
-                return None
-
-            # 1) Try importing by the global name first: from mod import <name>
-            if isinstance(mod, str) and mod and mod != "builtins":
-                try:
-                    m = import_module(mod)
-                    known_modules.add(mod)
-                    if getattr(m, name, None) is value:
-                        return f"from {mod} import {name}"
-                except Exception:
-                    pass
-
-                # 2) Try importing by the object's __name__
-                obj = getattr(value, "__name__", None)
-                if isinstance(obj, str) and obj:
-                    try:
-                        m = import_module(mod)
-                        if getattr(m, obj, None) is value:
-                            if name == obj:
-                                return f"from {mod} import {obj}"
-                            return f"from {mod} import {obj} as {name}"
-                    except Exception:
-                        pass
-
-            # 3) Fallback: search already-known modules for exported constants
-            for km in tuple(known_modules):
-                try:
-                    m = import_module(km)
-                    if getattr(m, name, None) is value:
-                        return f"from {km} import {name}"
-                except Exception:
-                    continue
-
-            return None
-
-        # ---- gather handler fns -------------------------------------------------
-
-        handler_fns = []
-        if getattr(self, "_upload_states", None) is not None:
-            handler_fns.append(self._upload_states)
-        if getattr(self, "_download_states", None) is not None:
-            handler_fns.append(self._download_states)
-        for d in getattr(self, "_dna_receivers", []) or []:
-            handler_fns.append(d.get("fn"))
-        for d in getattr(self, "_dna_senders", []) or []:
-            handler_fns.append(d.get("fn"))
-        for d in getattr(self, "_dna_hooks", []) or []:
-            handler_fns.append(d.get("fn"))
-
-        # ---- normal DNA entries -------------------------------------------------
-
+        # ----------------------------
+        # Handler DNA entries
+        # ----------------------------
         entries: list[dict] = []
 
-        if getattr(self, "_dna_upload_states", None) is not None:
+        if self._dna_upload_states is not None:
             fn = self._dna_upload_states["fn"]
             entries.append({
                 "type": "upload_states",
-                "source": _best_source(fn, self._dna_upload_states.get("source")),
+                "source": get_callable_source(fn, self._dna_upload_states.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
             })
 
-        if getattr(self, "_dna_download_states", None) is not None:
+        if self._dna_download_states is not None:
             fn = self._dna_download_states["fn"]
             entries.append({
                 "type": "download_states",
-                "source": _best_source(fn, self._dna_download_states.get("source")),
+                "source": get_callable_source(fn, self._dna_download_states.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
             })
 
-        for dna in getattr(self, "_dna_receivers", []) or []:
+        for dna in self._dna_receivers:
             fn = dna["fn"]
             entries.append({
                 "type": "receive",
                 "route": dna["route"],
                 "priority": dna["priority"],
-                "source": _best_source(fn, dna.get("source")),
+                "source": get_callable_source(fn, dna.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
             })
 
-        for dna in getattr(self, "_dna_senders", []) or []:
+        for dna in self._dna_senders:
             fn = dna["fn"]
             entries.append({
                 "type": "send",
@@ -1154,28 +704,29 @@ class SummonerClient:
                 "multi": dna["multi"],
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
                 "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
-                "source": _best_source(fn, dna.get("source")),
+                "source": get_callable_source(fn, dna.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
             })
 
-        for dna in getattr(self, "_dna_hooks", []) or []:
+        for dna in self._dna_hooks:
             fn = dna["fn"]
             entries.append({
                 "type": "hook",
                 "direction": dna["direction"].name,
                 "priority": dna["priority"],
-                "source": _best_source(fn, dna.get("source")),
+                "source": get_callable_source(fn, dna.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
             })
 
         if not include_context:
-            return _json.dumps(entries)
+            return json.dumps(entries)
 
-        # ---- context build (best-effort) ---------------------------------------
-
-        inferred_var_name = _infer_var_name()
+        # ----------------------------
+        # Context header (best-effort)
+        # ----------------------------
+        inferred_var_name = self._infer_client_binding_name()
         excluded_names = {inferred_var_name, "__builtins__"}
 
         recipes: dict[str, str] = {}
@@ -1186,49 +737,38 @@ class SummonerClient:
         # Helps compilation when annotations mention typing constructs.
         imports_out.add("from typing import *")
 
-        # If we emit Path(...) recipes, we must import it.
-        # (We only add Path if we actually emit a Path recipe.)
         path_needed = False
 
-        # lock detection without relying on exact class name
         try:
-            import asyncio as _asyncio
-            _lock_type = type(_asyncio.Lock())
+            lock_type = type(asyncio.Lock())
         except Exception:
-            _asyncio = None
-            _lock_type = None
+            lock_type = None
 
         known_modules: set[str] = set()
 
         for fn in handler_fns:
-            if fn is None:
-                continue
-            g = getattr(fn, "__globals__", {})
+            g = getattr(fn, "__globals__", None)
             if not isinstance(g, dict):
                 continue
 
-            # Names used in bytecode
+            # Names used in bytecode (globals referenced by the function body)
             names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
 
-            # Names used only in annotations (robust path): scan annotation objects
-            # This catches the exact failure you saw with `Event`.
+            # Names used only in annotations (when objects are directly referenced there)
             try:
                 ann = getattr(fn, "__annotations__", {}) or {}
                 for v in ann.values():
-                    # typing constructs (Union, list[Node], etc.) often aren't importable constants,
-                    # but real classes like Event/Node are.
                     if isinstance(v, type) or inspect.isfunction(v) or inspect.ismodule(v):
                         nm = getattr(v, "__name__", None)
                         if isinstance(nm, str) and nm:
-                            # We'll try to import it directly later, so ensure it is in scan set
                             names_to_scan.add(nm)
             except Exception:
                 pass
 
-            # Fallback: parse annotation names from source (covers some edge cases)
+            # Fallback: parse annotation identifiers from the source text
             try:
-                src = _best_source(fn)
-                names_to_scan |= _annotation_names_from_source(src)
+                src = get_callable_source(fn)
+                names_to_scan |= extract_annotation_identifiers(src)
             except Exception:
                 pass
 
@@ -1247,44 +787,38 @@ class SummonerClient:
                     continue
 
                 # Avoid auto-copying other clients
-                try:
-                    from summoner.client.client import SummonerClient as _SummonerClient
-                    if isinstance(value, _SummonerClient):
-                        missing.append(name)
-                        continue
-                except Exception:
-                    pass
+                if isinstance(value, SummonerClient):
+                    missing.append(name)
+                    continue
 
                 # Known rebuildable: asyncio locks
-                if _lock_type is not None and isinstance(value, _lock_type):
+                if lock_type is not None and isinstance(value, lock_type):
                     imports_out.add("import asyncio")
                     recipes.setdefault(name, "asyncio.Lock()")
                     continue
 
-                # Try to generate a deterministic recipe for some objects (ex: OBJECTS)
-                r = _recipe_for_value(name, value)
+                # Deterministic reconstruction recipes (Path; set(Node(...))).
+                r = rebuild_expression_for(value, node_type=Node)
                 if isinstance(r, str):
                     recipes.setdefault(name, r)
                     if "Path(" in r:
                         path_needed = True
-                    # If we emitted Node recipes, we need _Node in scope.
-                    # We use _Node in the recipe string above.
-                    if "_Node(" in r:
-                        imports_out.add("from summoner.protocol.process import Node as _Node")
+                    if "{}(".format(Node.__name__) in r:
+                        imports_out.add("from summoner.protocol.process import Node")
                     continue
 
-                # Modules / exported objects / exported constants -> imports
-                line = _import_line_for(name, value, g, known_modules)
+                # Stable import lines for modules/classes/constants
+                line = resolve_import_statement(name, value, known_modules)
                 if line is not None:
                     imports_out.add(line)
                     continue
 
-                # JSON-able constants -> globals
-                if _jsonable(value):
+                # JSON-serializable constants can be embedded directly
+                if is_jsonable(value):
                     globals_out.setdefault(name, value)
                     continue
 
-                # Otherwise unknown
+                # Otherwise, caller must provide/rebind this name explicitly
                 missing.append(name)
 
         if path_needed:
@@ -1299,7 +833,8 @@ class SummonerClient:
             "missing": sorted(set(missing)),
         }
 
-        return _json.dumps([context_entry] + entries)
+        return json.dumps([context_entry] + entries)
+
 
     # ==== RECEIVER EXECUTION ====
 
