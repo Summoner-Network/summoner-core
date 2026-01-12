@@ -1,11 +1,17 @@
-from summoner.client import ClientTranslation
+from summoner.client import ClientMerger
 import argparse
 
+from question_spell_1 import agent as agent_1
+from question_spell_2 import agent as agent_2
 
-from json_helper import load_dna_from_json
+from json_helper import save_dna_to_json
 
-dna_list = load_dna_from_json("question_spell_dna.json")
-agent = ClientTranslation(dna_list, name="TranslatedSpell")
+agent = ClientMerger(
+    [
+        {"var_name": "agent", "client": agent_1},
+        {"var_name": "agent", "client": agent_2},
+    ], 
+    name="Merged")
 
 flow = agent.flow().activate()
 flow.add_arrow_style(stem="-", brackets=("[", "]"), separator=",", tip=">")
@@ -15,5 +21,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a Summoner client with a specified config.")
     parser.add_argument('--config', dest='config_path', required=False, help='The relative path to the config file (JSON) for the client (e.g., --config myproject/client_config.json)')
     args = parser.parse_args()
+
+    save_dna_to_json(agent.dna(include_context=True), "question_spell_merge_3_dna.json")
 
     agent.run(config_path=args.config_path)

@@ -5,6 +5,14 @@ import asyncio
 from summoner.protocol.triggers import Move
 from summoner.protocol.process import Node
 
+import json
+from pathlib import Path
+
+def save_dict_to_json(data: dict, filename: str) -> None:
+    path = Path(__file__).resolve().parent / filename
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 QUESTIONS = [
     "What is your name?",
     "What is the meaning of life?",
@@ -92,5 +100,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a Summoner client with a specified config.")
     parser.add_argument('--config', dest='config_path', required=False, help='The relative path to the config file (JSON) for the client (e.g., --config myproject/client_config.json)')
     args = parser.parse_args()
+
+    save_dict_to_json(json.loads(agent.dna(include_context=True)), "question_spell_dna.json")
 
     agent.run(config_path=args.config_path)

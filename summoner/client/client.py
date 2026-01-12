@@ -21,6 +21,11 @@ if target_path not in sys.path:
 
 from summoner.utils import (
     load_config,
+    is_jsonable,
+    extract_annotation_identifiers,
+    resolve_import_statement,
+    get_callable_source,
+    rebuild_expression_for,
     )
 from summoner.logger import (
     get_logger, 
@@ -69,7 +74,7 @@ class SummonerClient:
     DEFAULT_EVENT_BRIDGE_SIZE = 1000
     DEFAULT_MAX_CONSECUTIVE_ERRORS = 3          # Failed attempts to send before disconnecting
 
-    core_version = "1.0.1"
+    core_version = "1.1.0"
 
     def __init__(self, name: Optional[str] = None):
         
@@ -141,6 +146,9 @@ class SummonerClient:
         self._dna_receivers: list[dict] = []
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
+
+        self._dna_upload_states: Optional[dict] = None
+        self._dna_download_states: Optional[dict] = None
 
     # ==== VERSION SPECIFIC ====
 
@@ -222,10 +230,13 @@ class SummonerClient:
                 fn,
                 decorator_name="@upload_states",
                 allow_param=(type(None), str, dict, Any),   # the payload
-                allow_return=(type(None), str, 
-                                list, list[str], 
-                                dict, dict[str, str], dict[str, list[str]],
-                                dict[str, Union[str, list[str]]]), # the payload-dependent tape
+                allow_return=(type(None), str, Any, Node, list, dict,
+                                list[str],  dict[str, str],  dict[str, list[str]],
+                                list[Node], dict[str, Node], dict[str, list[Node]],
+                                dict[str, Union[str, list[str]]],
+                                dict[str, Union[Node, list[Node]]],
+                                dict[str, Union[str, list[str], Node, list[Node]]],
+                                ), # the payload-dependent tape
                 logger=self.logger,
             )
             
@@ -234,6 +245,12 @@ class SummonerClient:
             
             if self._upload_states is not None:
                 self.logger.warning("@upload_states handler overwritten")
+
+            # ----[ DNA capture ]----
+            self._dna_upload_states = {
+                "fn": fn,
+                "source": inspect.getsource(fn),
+            }
 
             self._upload_states = fn
 
@@ -256,11 +273,16 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@download_states",
-                allow_param=(type(None), Node, Any,
-                                list, list[Node], 
-                                dict, dict[str, Node], dict[str, list[Node]], dict[str, Union[Node, list[Node]]], 
-                                dict[Optional[str], Node], dict[Optional[str], list[Node]],dict[Optional[str], Union[Node, list[Node]]]),
-                allow_return=(type(None), bool, Any),
+                allow_param=(type(None), Node, Any, list, dict, 
+                                list[Node], 
+                                dict[str, Node], 
+                                dict[str, list[Node]], 
+                                dict[str, Union[Node, list[Node]]], 
+                                dict[Optional[str], Node], 
+                                dict[Optional[str], list[Node]],
+                                dict[Optional[str], Union[Node, list[Node]]],
+                                ),
+                allow_return=(type(None), Any),
                 logger=self.logger,
             )
 
@@ -269,6 +291,12 @@ class SummonerClient:
             
             if self._download_states is not None:
                 self.logger.warning("@download_states handler overwritten")
+
+            # ----[ DNA capture ]----
+            self._dna_download_states = {
+                "fn": fn,
+                "source": inspect.getsource(fn),
+            }
 
             self._download_states = fn
 
@@ -312,7 +340,7 @@ class SummonerClient:
                 fn,
                 decorator_name="@hook",
                 allow_param=(Any, str, dict),
-                allow_return=(type(None), str, dict),
+                allow_return=(type(None), str, dict, Any),
                 logger=self.logger,
             )
             
@@ -374,7 +402,7 @@ class SummonerClient:
                 fn,
                 decorator_name="@receive",
                 allow_param=(Any, str, dict),
-                allow_return=(type(None), Event),
+                allow_return=(type(None), Event, Any),
                 logger=self.logger,
             )
 
@@ -393,7 +421,7 @@ class SummonerClient:
                 "fn": fn,
                 "route": route,
                 "priority": tuple_priority,
-                "source": inspect.getsource(fn),  # optional, for text serialization
+                "source": inspect.getsource(fn),  # for text serialization
             })
 
             # ----[ Registration Code ]----
@@ -517,52 +545,320 @@ class SummonerClient:
 
     # ==== DNA PROCESSING ====
 
-    def dna(self) -> str:
+    def _iter_registered_handler_functions(self):
         """
-        Serialize this client's handlers into a JSON string.
-        Each entry captures:
-          - type: "receive" | "send" | "hook"
-          - decorator parameters (route, priority, etc.)
-          - source: the full text of the async function
-        """
-        entries = []
+        Iterate over all handler callables that define the client's behavior.
 
-        # 1) Receivers
+        This is used by dna(include_context=True) to:
+          - infer the client binding name (commonly "agent") used in handler source code,
+          - scan handler globals for referenced symbols to export as imports/globals/recipes/missing.
+
+        Yields
+        ------
+        Callable
+            Any registered handler function attached to this client. Entries that are
+            not present (None) are skipped.
+        """
+        if self._upload_states is not None:
+            yield self._upload_states
+
+        if self._download_states is not None:
+            yield self._download_states
+
+        for d in self._dna_receivers:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
+
+        for d in self._dna_senders:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
+
+        for d in self._dna_hooks:
+            fn = d.get("fn")
+            if fn is not None:
+                yield fn
+
+    def _infer_client_binding_name(self) -> str:
+        """
+        Infer the module-global variable name that refers to this client instance.
+
+        Rationale
+        ---------
+        User-authored handler sources frequently reference the client via a global
+        variable, for example:
+
+            await agent.travel_to(...)
+            await agent.quit()
+
+        When cloning or merging from DNA (rehydrating from sources), the evaluation
+        sandbox must bind that same name to the reconstructed client instance.
+        This method attempts to recover the intended name by scanning the globals
+        dict of registered handlers.
+
+        Returns
+        -------
+        str
+            The inferred binding name if found; otherwise "agent".
+        """
+        for fn in self._iter_registered_handler_functions():
+            g = getattr(fn, "__globals__", None)
+            if not isinstance(g, dict):
+                continue
+
+            # Look for any global variable that points exactly to this client instance.
+            for k, v in g.items():
+                if v is self and isinstance(k, str):
+                    return k
+
+        return "agent"
+
+    def dna(self, include_context: bool = False) -> str:
+        """
+        Serialize this client's registered behavior into a JSON string ("DNA").
+
+        Purpose
+        -------
+        DNA is intended to support:
+          1) cloning: rehydrate a client from data by re-evaluating handler sources
+          2) merging: combine multiple clients into a composite client (ClientMerger)
+
+        Output schema
+        -------------
+        The returned JSON encodes a list[dict], where each dict is a DNA entry.
+
+        If include_context=False:
+          - the list contains only handler entries, ordered as:
+              upload_states
+              download_states
+              receive (one per @receive)
+              send    (one per @send)
+              hook    (one per @hook)
+
+        If include_context=True:
+          - the first entry is a "__context__" header that helps rehydration,
+            followed by the same handler entries as above.
+
+        Context header fields
+        ---------------------
+        - var_name:
+            The preferred global name used to reference the client in handler sources.
+            Typically "agent".
+        - imports:
+            Import statements that appear safe and stable to replay in a rehydration
+            sandbox.
+        - globals:
+            JSON-serializable constants referenced by handler sources.
+        - recipes:
+            Conservative reconstruction expressions for a small set of known patterns
+            (for example asyncio.Lock()).
+        - missing:
+            Symbols referenced by handlers that cannot be imported or serialized.
+            Rehydration must provide these explicitly.
+
+        Portability rule
+        ----------------
+        DNA is meant to be replayable across environments. Unstable runtime bindings
+        (for example '__main__' imports or live objects that cannot be rebuilt) should
+        end up in "missing", not embedded implicitly.
+
+        Notes
+        -----
+        - This captures decorated handlers and their source code.
+        - Flow construction and trigger enum creation are not captured unless they are
+          referenced and executed within decorated handler sources.
+        """
+        import builtins
+
+        # Collect handler functions once so we can reuse them for context analysis.
+        handler_fns = list(self._iter_registered_handler_functions())
+
+        # ----------------------------
+        # Handler DNA entries
+        # ----------------------------
+        entries: list[dict] = []
+
+        # Upload state hook, if present
+        if self._dna_upload_states is not None:
+            fn = self._dna_upload_states["fn"]
+            entries.append({
+                "type": "upload_states",
+                "source": get_callable_source(fn, self._dna_upload_states.get("source")),
+                "module": fn.__module__,
+                "fn_name": fn.__name__,
+            })
+
+        # Download state hook, if present
+        if self._dna_download_states is not None:
+            fn = self._dna_download_states["fn"]
+            entries.append({
+                "type": "download_states",
+                "source": get_callable_source(fn, self._dna_download_states.get("source")),
+                "module": fn.__module__,
+                "fn_name": fn.__name__,
+            })
+
+        # All receivers
         for dna in self._dna_receivers:
+            fn = dna["fn"]
             entries.append({
-                "type":    "receive",
-                "route":   dna["route"],
+                "type": "receive",
+                "route": dna["route"],
                 "priority": dna["priority"],
-                "source":  inspect.getsource(dna["fn"]),
-                "module":   dna["fn"].__module__,
-                "fn_name":  dna["fn"].__name__,
+                "source": get_callable_source(fn, dna.get("source")),
+                "module": fn.__module__,
+                "fn_name": fn.__name__,
             })
 
-        # 2) Senders
+        # All senders
         for dna in self._dna_senders:
+            fn = dna["fn"]
             entries.append({
-                "type":        "send",
-                "route":       dna["route"],
-                "multi":       dna["multi"],
+                "type": "send",
+                "route": dna["route"],
+                "multi": dna["multi"],
+                # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
-                "on_actions":  [a.__name__ for a in (dna["on_actions"] or [])],
-                "source":      inspect.getsource(dna["fn"]),
-                "module":   dna["fn"].__module__,
-                "fn_name":  dna["fn"].__name__,
+                "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
+                "source": get_callable_source(fn, dna.get("source")),
+                "module": fn.__module__,
+                "fn_name": fn.__name__,
             })
 
-        # 3) Hooks
+        # All hooks
         for dna in self._dna_hooks:
+            fn = dna["fn"]
             entries.append({
-                "type":     "hook",
+                "type": "hook",
                 "direction": dna["direction"].name,
                 "priority": dna["priority"],
-                "source":   inspect.getsource(dna["fn"]),
-                "module":   dna["fn"].__module__,
-                "fn_name":  dna["fn"].__name__,
+                "source": get_callable_source(fn, dna.get("source")),
+                "module": fn.__module__,
+                "fn_name": fn.__name__,
             })
 
-        return json.dumps(entries)
+        # Fast path: return only handler entries.
+        if not include_context:
+            return json.dumps(entries)
+
+        # ----------------------------
+        # Context header (best-effort)
+        # ----------------------------
+
+        # Identify the name used to reference this client in handler globals.
+        inferred_var_name = self._infer_client_binding_name()
+
+        # Avoid exporting bindings that would conflict with the client variable itself.
+        excluded_names = {inferred_var_name, "__builtins__"}
+
+        recipes: dict[str, str] = {}
+        globals_out: dict[str, object] = {}
+        imports_out: set[str] = set()
+        missing: list[str] = []
+
+        # Helps compilation when annotations mention typing constructs.
+        imports_out.add("from typing import *")
+
+        path_needed = False
+
+        # Identify the runtime type of asyncio.Lock() so we can detect it.
+        try:
+            lock_type = type(asyncio.Lock())
+        except Exception:
+            lock_type = None
+
+        # Used by resolve_import_statement to avoid emitting repeated imports.
+        known_modules: set[str] = set()
+
+        for fn in handler_fns:
+            g = getattr(fn, "__globals__", None)
+            if not isinstance(g, dict):
+                continue
+
+            # Names referenced by the function body.
+            names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
+
+            # Names referenced only via annotations.
+            try:
+                ann = getattr(fn, "__annotations__", {}) or {}
+                for v in ann.values():
+                    if isinstance(v, type) or inspect.isfunction(v) or inspect.ismodule(v):
+                        nm = getattr(v, "__name__", None)
+                        if isinstance(nm, str) and nm:
+                            names_to_scan.add(nm)
+            except Exception:
+                pass
+
+            # Fallback: parse identifiers from annotation syntax in the source.
+            try:
+                src = get_callable_source(fn)
+                names_to_scan |= extract_annotation_identifiers(src)
+            except Exception:
+                pass
+
+            for name in names_to_scan:
+                if name in excluded_names:
+                    continue
+                if name in builtins.__dict__:
+                    continue
+                if name not in g:
+                    continue
+
+                value = g[name]
+
+                # Skip binding the client itself.
+                if value is self:
+                    continue
+
+                # Avoid auto-copying other clients. These must be supplied explicitly.
+                if isinstance(value, SummonerClient):
+                    missing.append(name)
+                    continue
+
+                # Recognize asyncio.Lock() instances and rebuild them by recipe.
+                if lock_type is not None and isinstance(value, lock_type):
+                    imports_out.add("import asyncio")
+                    recipes.setdefault(name, "asyncio.Lock()")
+                    continue
+
+                # Try to rebuild via a deterministic expression when possible.
+                r = rebuild_expression_for(value, node_type=Node)
+                if isinstance(r, str):
+                    recipes.setdefault(name, r)
+                    if "Path(" in r:
+                        path_needed = True
+                    if "{}(".format(Node.__name__) in r:
+                        imports_out.add("from summoner.protocol.process import Node")
+                    continue
+
+                # Try to emit a stable import statement for this symbol.
+                line = resolve_import_statement(name, value, known_modules)
+                if line is not None:
+                    imports_out.add(line)
+                    continue
+
+                # If the object can be JSON-encoded, inline it in globals.
+                if is_jsonable(value):
+                    globals_out.setdefault(name, value)
+                    continue
+
+                # Otherwise, rehydration must provide this name explicitly.
+                missing.append(name)
+
+        if path_needed:
+            imports_out.add("from pathlib import Path")
+
+        context_entry = {
+            "type": "__context__",
+            "var_name": inferred_var_name,
+            "imports": sorted(imports_out),
+            "globals": globals_out,
+            "recipes": recipes,
+            "missing": sorted(set(missing)),
+        }
+
+        return json.dumps([context_entry] + entries)
 
     # ==== RECEIVER EXECUTION ====
 
