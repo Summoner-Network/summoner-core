@@ -1,0 +1,51 @@
+[
+  {
+    "type": "__context__",
+    "var_name": "agent",
+    "imports": [
+      "from summoner.protocol.process import Node",
+      "from summoner.protocol.triggers import Move",
+      "from typing import *",
+      "from typing import Union",
+      "import asyncio"
+    ],
+    "globals": {
+      "state": "spell",
+      "is_back": false
+    },
+    "recipes": {},
+    "missing": [
+      "Trigger"
+    ]
+  },
+  {
+    "type": "upload_states",
+    "source": "@agent.upload_states()\nasync def upload(msg):\n    global state\n    print(\"[upload]\", state)\n    return state\n",
+    "module": "__main__",
+    "fn_name": "upload"
+  },
+  {
+    "type": "download_states",
+    "source": "@agent.download_states()\nasync def download(possible_state):\n    global state\n    print(\"[download]\", possible_state, state)\n    if set(possible_state) == {Node(\"spell\")}:\n        state = \"spell\"\n    if set(possible_state) == {Node(\"effect\")}:\n        state = \"effect\"\n    print(\"[download] -->\", state)\n",
+    "module": "__main__",
+    "fn_name": "download"
+  },
+  {
+    "type": "receive",
+    "route": "spell --> effect",
+    "priority": [],
+    "source": "@agent.receive(route=\"spell --> effect\")\nasync def custom_receive(msg: Union[dict,str]) -> None:\n    global is_back\n    msg = (msg[\"content\"] if isinstance(msg, dict) and \"content\" in msg else msg) \n    tag = (\"\\r[From server]\" if isinstance(msg, str) and msg[:len(\"Warning:\")] == \"Warning:\" else \"\\r[Received]\")\n    print(tag, msg, flush=True)\n    if msg == \"/travel\":\n        await agent.travel_to(host = \"testnet.summoner.org\", port = 8888)\n        is_back = True\n        return Move(Trigger.ok)\n    elif msg == \"/quit\":\n        await agent.quit()\n        return None\n    elif msg == \"/go_home\":\n        await agent.travel_to(host = agent.default_host, port = agent.default_port)\n        is_back = True\n        return None\n    print(\"waiting for instructions... \", flush=True)\n",
+    "module": "__main__",
+    "fn_name": "custom_receive"
+  },
+  {
+    "type": "send",
+    "route": "spell",
+    "multi": false,
+    "on_triggers": [],
+    "on_actions": [],
+    "source": "@agent.send(route=\"spell\")\nasync def send_question() -> str:\n    global is_back\n    if is_back and agent.host == agent.default_host and agent.port == agent.default_port:\n        is_back = False\n        return \"I am back\"\n    else:\n        await asyncio.sleep(0.1)\n",
+    "module": "__main__",
+    "fn_name": "send_question"
+  }
+]
