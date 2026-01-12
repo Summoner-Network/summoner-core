@@ -547,16 +547,17 @@ class SummonerClient:
 
     def _iter_registered_handler_functions(self):
         """
-        Yield all registered handler functions attached to this client.
+        Iterate over all handler callables that define the client's behavior.
 
-        This provides a single, consistent place to enumerate handlers that may be
-        referenced for source capture, binding-name inference, and context analysis.
+        This is used by dna(include_context=True) to:
+          - infer the client binding name (commonly "agent") used in handler source code,
+          - scan handler globals for referenced symbols to export as imports/globals/recipes/missing.
 
         Yields
         ------
         Callable
-            Each handler function registered on this client (upload/download, receivers,
-            senders, hooks). Entries with missing/None functions are skipped.
+            Any registered handler function attached to this client. Entries that are
+            not present (None) are skipped.
         """
         if self._upload_states is not None:
             yield self._upload_states
@@ -579,18 +580,22 @@ class SummonerClient:
             if fn is not None:
                 yield fn
 
-
     def _infer_client_binding_name(self) -> str:
         """
         Infer the module-global variable name that refers to this client instance.
 
-        Some user-authored handler source code references the client through a global
-        name (commonly "agent"), for example:
-            await agent.travel_to(...)
+        Rationale
+        ---------
+        User-authored handler sources frequently reference the client via a global
+        variable, for example:
 
-        When rehydrating such code from source, the sandbox globals must bind the same
-        name to the reconstructed client instance. This method attempts to recover
-        that binding name by scanning the globals dict of registered handlers.
+            await agent.travel_to(...)
+            await agent.quit()
+
+        When cloning or merging from DNA (rehydrating from sources), the evaluation
+        sandbox must bind that same name to the reconstructed client instance.
+        This method attempts to recover the intended name by scanning the globals
+        dict of registered handlers.
 
         Returns
         -------
@@ -609,57 +614,64 @@ class SummonerClient:
 
         return "agent"
 
-
     def dna(self, include_context: bool = False) -> str:
         """
-        Serialize this client's *registered behavior* into a JSON string (“DNA”).
+        Serialize this client's registered behavior into a JSON string ("DNA").
 
-        The DNA output is intended for:
-        - cloning a client from data (rehydrating handlers from their sources), and
-        - merging multiple clients into a single composite client (ClientMerger).
+        Purpose
+        -------
+        DNA is intended to support:
+          1) cloning: rehydrate a client from data by re-evaluating handler sources
+          2) merging: combine multiple clients into a composite client (ClientMerger)
 
-        Output format
+        Output schema
         -------------
-        The returned JSON string encodes a list[dict]. Each dict is a *DNA entry*.
+        The returned JSON encodes a list[dict], where each dict is a DNA entry.
 
-        1) If include_context=False (default):
-        The list contains only handler entries, in a stable order:
-            - upload_states
-            - download_states
-            - receive (one entry per @receive)
-            - send    (one entry per @send)
-            - hook    (one entry per @hook)
+        If include_context=False:
+          - the list contains only handler entries, ordered as:
+              upload_states
+              download_states
+              receive (one per @receive)
+              send    (one per @send)
+              hook    (one per @hook)
 
-        2) If include_context=True:
-        The list begins with a special context header entry of type "__context__",
-        followed by the same handler entries as above.
+        If include_context=True:
+          - the first entry is a "__context__" header that helps rehydration,
+            followed by the same handler entries as above.
 
-        The context header is a best-effort portability layer:
-        - var_name: preferred global name of this client instance in handler sources
-            (commonly "agent").
-        - imports: import statements that are safe and stable to replay.
-        - globals: JSON-serializable constants referenced by handlers (e.g. QUESTIONS).
-        - recipes: conservative reconstruction snippets for some common objects
-            (e.g. asyncio.Lock()).
-        - missing: names referenced by handlers that cannot be safely imported
-            or serialized (must be provided explicitly when rehydrating).
+        Context header fields
+        ---------------------
+        - var_name:
+            The preferred global name used to reference the client in handler sources.
+            Typically "agent".
+        - imports:
+            Import statements that appear safe and stable to replay in a rehydration
+            sandbox.
+        - globals:
+            JSON-serializable constants referenced by handler sources.
+        - recipes:
+            Conservative reconstruction expressions for a small set of known patterns
+            (for example asyncio.Lock()).
+        - missing:
+            Symbols referenced by handlers that cannot be imported or serialized.
+            Rehydration must provide these explicitly.
 
-        Portability rule ("child has its own mitochondria")
-        ---------------------------------------------------
-        The produced DNA should remain portable across environments. In particular:
-        - We do NOT emit imports from '__main__' (not stable across executions).
-        - Such dependencies should appear in 'missing' and be provided via a
-        rebinding mechanism when evaluating sources.
+        Portability rule
+        ----------------
+        DNA is meant to be replayable across environments. Unstable runtime bindings
+        (for example '__main__' imports or live objects that cannot be rebuilt) should
+        end up in "missing", not embedded implicitly.
 
         Notes
         -----
-        - This function captures decorated handlers and their source code.
-        - Flow construction (flow.activate, arrow styles, triggers enum creation)
-        is not captured here unless it is referenced through decorated sources.
+        - This captures decorated handlers and their source code.
+        - Flow construction and trigger enum creation are not captured unless they are
+          referenced and executed within decorated handler sources.
         """
         import builtins
 
-        # Collect handler functions once and reuse.
+        # Collect handler functions once so we can reuse them for context analysis.
         handler_fns = list(self._iter_registered_handler_functions())
 
         # ----------------------------
@@ -667,6 +679,7 @@ class SummonerClient:
         # ----------------------------
         entries: list[dict] = []
 
+        # Upload state hook, if present
         if self._dna_upload_states is not None:
             fn = self._dna_upload_states["fn"]
             entries.append({
@@ -676,6 +689,7 @@ class SummonerClient:
                 "fn_name": fn.__name__,
             })
 
+        # Download state hook, if present
         if self._dna_download_states is not None:
             fn = self._dna_download_states["fn"]
             entries.append({
@@ -685,6 +699,7 @@ class SummonerClient:
                 "fn_name": fn.__name__,
             })
 
+        # All receivers
         for dna in self._dna_receivers:
             fn = dna["fn"]
             entries.append({
@@ -696,12 +711,14 @@ class SummonerClient:
                 "fn_name": fn.__name__,
             })
 
+        # All senders
         for dna in self._dna_senders:
             fn = dna["fn"]
             entries.append({
                 "type": "send",
                 "route": dna["route"],
                 "multi": dna["multi"],
+                # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
                 "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
                 "source": get_callable_source(fn, dna.get("source")),
@@ -709,6 +726,7 @@ class SummonerClient:
                 "fn_name": fn.__name__,
             })
 
+        # All hooks
         for dna in self._dna_hooks:
             fn = dna["fn"]
             entries.append({
@@ -720,13 +738,18 @@ class SummonerClient:
                 "fn_name": fn.__name__,
             })
 
+        # Fast path: return only handler entries.
         if not include_context:
             return json.dumps(entries)
 
         # ----------------------------
         # Context header (best-effort)
         # ----------------------------
+
+        # Identify the name used to reference this client in handler globals.
         inferred_var_name = self._infer_client_binding_name()
+
+        # Avoid exporting bindings that would conflict with the client variable itself.
         excluded_names = {inferred_var_name, "__builtins__"}
 
         recipes: dict[str, str] = {}
@@ -739,11 +762,13 @@ class SummonerClient:
 
         path_needed = False
 
+        # Identify the runtime type of asyncio.Lock() so we can detect it.
         try:
             lock_type = type(asyncio.Lock())
         except Exception:
             lock_type = None
 
+        # Used by resolve_import_statement to avoid emitting repeated imports.
         known_modules: set[str] = set()
 
         for fn in handler_fns:
@@ -751,10 +776,10 @@ class SummonerClient:
             if not isinstance(g, dict):
                 continue
 
-            # Names used in bytecode (globals referenced by the function body)
+            # Names referenced by the function body.
             names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
 
-            # Names used only in annotations (when objects are directly referenced there)
+            # Names referenced only via annotations.
             try:
                 ann = getattr(fn, "__annotations__", {}) or {}
                 for v in ann.values():
@@ -765,7 +790,7 @@ class SummonerClient:
             except Exception:
                 pass
 
-            # Fallback: parse annotation identifiers from the source text
+            # Fallback: parse identifiers from annotation syntax in the source.
             try:
                 src = get_callable_source(fn)
                 names_to_scan |= extract_annotation_identifiers(src)
@@ -782,22 +807,22 @@ class SummonerClient:
 
                 value = g[name]
 
-                # Skip binding the client itself
+                # Skip binding the client itself.
                 if value is self:
                     continue
 
-                # Avoid auto-copying other clients
+                # Avoid auto-copying other clients. These must be supplied explicitly.
                 if isinstance(value, SummonerClient):
                     missing.append(name)
                     continue
 
-                # Known rebuildable: asyncio locks
+                # Recognize asyncio.Lock() instances and rebuild them by recipe.
                 if lock_type is not None and isinstance(value, lock_type):
                     imports_out.add("import asyncio")
                     recipes.setdefault(name, "asyncio.Lock()")
                     continue
 
-                # Deterministic reconstruction recipes (Path; set(Node(...))).
+                # Try to rebuild via a deterministic expression when possible.
                 r = rebuild_expression_for(value, node_type=Node)
                 if isinstance(r, str):
                     recipes.setdefault(name, r)
@@ -807,18 +832,18 @@ class SummonerClient:
                         imports_out.add("from summoner.protocol.process import Node")
                     continue
 
-                # Stable import lines for modules/classes/constants
+                # Try to emit a stable import statement for this symbol.
                 line = resolve_import_statement(name, value, known_modules)
                 if line is not None:
                     imports_out.add(line)
                     continue
 
-                # JSON-serializable constants can be embedded directly
+                # If the object can be JSON-encoded, inline it in globals.
                 if is_jsonable(value):
                     globals_out.setdefault(name, value)
                     continue
 
-                # Otherwise, caller must provide/rebind this name explicitly
+                # Otherwise, rehydration must provide this name explicitly.
                 missing.append(name)
 
         if path_needed:
@@ -834,7 +859,6 @@ class SummonerClient:
         }
 
         return json.dumps([context_entry] + entries)
-
 
     # ==== RECEIVER EXECUTION ====
 
