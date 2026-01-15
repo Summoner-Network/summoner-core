@@ -1148,7 +1148,8 @@ class SummonerClient:
                 
                 # No concurrency on batch_drain (initialized in run())
                 if not self.batch_drain:
-                    await writer.drain()
+                    async with self.writer_lock:
+                        await writer.drain()
 
             except Exception as e:
                 consecutive_errors += 1
@@ -1267,7 +1268,8 @@ class SummonerClient:
                 await self.send_queue.join()
 
                 if self.batch_drain:
-                    await writer.drain()
+                    async with self.writer_lock:
+                        await writer.drain()
 
                 # ----[ Quit or Travel ]----
                 async with self.connection_lock:
