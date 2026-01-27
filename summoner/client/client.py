@@ -74,7 +74,7 @@ class SummonerClient:
     DEFAULT_EVENT_BRIDGE_SIZE = 1000
     DEFAULT_MAX_CONSECUTIVE_ERRORS = 3          # Failed attempts to send before disconnecting
 
-    core_version = "1.1.0"
+    core_version = "1.1.1"
 
     def __init__(self, name: Optional[str] = None):
         
@@ -362,7 +362,6 @@ class SummonerClient:
                 "source": inspect.getsource(fn),
             })
 
-
             # ----[ Registration Code ]----
             async def register():
                 async with self.hooks_lock:
@@ -427,20 +426,29 @@ class SummonerClient:
             # ----[ Registration Code ]----
             async def register():
                 receiver = Receiver(fn=fn, priority=tuple_priority)
+                
+                parsed_route = None
+                normalized_route = route
 
                 if self._flow.in_use:
-                    parsed_route = self._flow.parse_route(route)
-                    normalized_route = str(parsed_route)
+                    try:
+                        parsed_route = self._flow.parse_route(route)
+                        normalized_route = str(parsed_route)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"@receive: could not parse route {route!r} while flow is enabled; "
+                            f"registering raw route. Error: {type(e).__name__}: {e}"
+                        )
+                        parsed_route = None
+                        normalized_route = route
 
                 async with self.routes_lock:
                     if route in self.receiver_index:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
                     
-                    if self._flow.in_use:
+                    if self._flow.in_use and parsed_route is not None:
                         self.receiver_parsed_routes[normalized_route] = parsed_route
-                        self.receiver_index[normalized_route] = receiver
-                    else:
-                        self.receiver_index[route] = receiver
+                    self.receiver_index[normalized_route] = receiver
 
             # ----[ Safe Registration ]----
             self._schedule_registration(register())
@@ -521,16 +529,28 @@ class SummonerClient:
                 actions_exist = isinstance(on_actions, set) and bool(on_actions)
                 triggers_exist = isinstance(on_triggers, set) and bool(on_triggers)
                 
+                parsed_route = None
+                normalized_route = route
+
                 if self._flow.in_use:
-                    parsed_route = self._flow.parse_route(route)
-                    normalized_route = str(parsed_route)
+                    try:
+                        parsed_route = self._flow.parse_route(route)
+                        normalized_route = str(parsed_route)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"@send: could not parse route {route!r} while flow is enabled; "
+                            f"registering raw route. Error: {type(e).__name__}: {e}"
+                        )
+                        parsed_route = None
+                        normalized_route = route
 
                 async with self.routes_lock:
                     if self._flow.in_use:
                         self.sender_index.setdefault(normalized_route, [])
                         self.sender_index[normalized_route].append(sender)
-                        if route not in self.sender_parsed_routes and actions_exist or triggers_exist:
-                            self.sender_parsed_routes[normalized_route] = parsed_route
+
+                        if parsed_route is not None and (actions_exist or triggers_exist):
+                            self.sender_parsed_routes.setdefault(normalized_route, parsed_route)
                     else:
                         self.sender_index.setdefault(route, [])
                         self.sender_index[route].append(sender)
@@ -702,9 +722,21 @@ class SummonerClient:
         # All receivers
         for dna in self._dna_receivers:
             fn = dna["fn"]
+            raw_route = dna["route"]
+
+            try:
+                if self._flow.in_use:
+                    route_key = str(self._flow.parse_route(raw_route))
+                else:
+                    route_key = raw_route
+            except Exception:
+                route_key = raw_route
+            route_key = "".join(str(route_key).split())
+
             entries.append({
                 "type": "receive",
-                "route": dna["route"],
+                "route": raw_route, # original route string
+                "route_key": route_key, # stable route representative
                 "priority": dna["priority"],
                 "source": get_callable_source(fn, dna.get("source")),
                 "module": fn.__module__,
@@ -714,9 +746,21 @@ class SummonerClient:
         # All senders
         for dna in self._dna_senders:
             fn = dna["fn"]
+            raw_route = dna["route"]
+
+            try:
+                if self._flow.in_use:
+                    route_key = str(self._flow.parse_route(raw_route))
+                else:
+                    route_key = raw_route
+            except Exception:
+                route_key = raw_route
+            route_key = "".join(str(route_key).split())
+
             entries.append({
                 "type": "send",
-                "route": dna["route"],
+                "route": raw_route,          # original route string
+                "route_key": route_key,     # stable route representative
                 "multi": dna["multi"],
                 # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
@@ -981,7 +1025,8 @@ class SummonerClient:
                         except Exception as e:
                             self.logger.error(
                                 f"Receiving hook {receiving_hook.__name__} (priority={priority}) "
-                                f"failed on payload {payload!r}: {e}"
+                                f"failed on payload {payload!r}: {e}",
+                                exc_info=True
                             )
                             new_payload = payload
                         payload = new_payload
@@ -1123,7 +1168,8 @@ class SummonerClient:
                         except Exception as e:
                             self.logger.error(
                                 f"[route={route}] Sending hook {sending_hook.__name__} (priority={priority}) "
-                                f"failed on payload {payload!r}: {e}"
+                                f"failed on payload {payload!r}: {e}",
+                                exc_info=True
                             )
                             new_payload = payload
                         payload = new_payload
@@ -1454,13 +1500,14 @@ class SummonerClient:
                     f"[{type(e).__name__}: {e}] "
                     f"({stage}) retry {attempts} of "
                     f"{limit if limit is not None else '∞'}; "
-                    f"sleeping {self.retry_delay_seconds}s"
+                    f"sleeping {self.retry_delay_seconds}s",
+                    exc_info=True
                 )
                 await asyncio.sleep(self.retry_delay_seconds)
 
             # Check retry limit
             if (limit is not None and attempts >= limit):
-                self.logger.error(f"{stage} retry limit reached ({limit})")
+                self.logger.error(f"{stage} retry limit reached ({limit})", exc_info=True)
                 return False
 
     async def _get_client_intent(self) -> ClientIntent:
