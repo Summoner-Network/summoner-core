@@ -79,6 +79,12 @@ pub struct ServerConfig {
     /// Port number (e.g. `8888`)
     pub port: u16,
 
+    /// **The IP address of this specific server instance, for peers to connect to.**
+    pub local_address: Option<String>,
+
+    /// **An optional list of other server addresses in the mesh.**
+    pub peer_addresses: Option<Vec<String>>,
+
     /// Logger configuration (text/JSON, file rotation, key filtering, etc.)
     pub logger: LoggerConfig,
     
@@ -159,8 +165,13 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         // Read each setting, supplying a sensible default value
         let host                          = extract_or(dict, "host", "127.0.0.1".to_string());
         let port                          = extract_or(dict, "port", 8888);
-        let connection_buffer_size        = extract_or(dict, "connection_buffer_size", 128);
         
+        // --- ADDED MESHING/PEER CONFIG ---
+        let local_address                 = extract_or(dict, "local_address", None);
+        let peer_addresses                = extract_or(dict, "peer_addresses", None);
+        // --- END ADDED CONFIG ---
+
+        let connection_buffer_size        = extract_or(dict, "connection_buffer_size", 128);
         let rate_limit                    = extract_or(dict, "rate_limit_msgs_per_minute", 300);
         let command_buffer_size           = extract_or(dict, "command_buffer_size", 32);
         let quarantine_cooldown_secs      = extract_or(dict, "quarantine_cooldown_secs", 300);
@@ -258,6 +269,8 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         Ok(ServerConfig {
             host,
             port,
+            local_address,
+            peer_addresses,
             logger,
             connection_buffer_size,
             client_timeout,
