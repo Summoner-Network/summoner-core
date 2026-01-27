@@ -133,6 +133,7 @@ Use the ready-made scripts `open_server.sh` and `open_client.sh` in the repo roo
 
 **POSIX (macOS/Linux)**
 
+
 ```bash
 # terminal A
 source venv/bin/activate
@@ -144,6 +145,7 @@ bash open_client.sh
 ```
 
 **Windows**
+
 Use **Git Bash** (or WSL). Activate the venv then run the scripts with Bash:
 
 ```bash
@@ -154,7 +156,8 @@ bash ./open_client.sh   # terminal B
 
 If needed: `chmod +x open_server.sh open_client.sh`.
 
-**Expected**
+**Expected behavior**
+
 Server starts and listens and client connects and can send messages through a chat interactive window. If anything fails, re-run `source setup.sh` and try again.
 
 
