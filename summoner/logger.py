@@ -182,7 +182,6 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
     logger.setLevel(log_level)
 
     # 2) Attach console/file handlers according to config.
-    #     Do NOT gate this on "logger.handlers" because external handlers
 
     # console
     if logger_cfg.get("enable_console_log", True):
