@@ -171,7 +171,7 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
       - backup_count (int)
       - log_keys (list[str] or None)
     """
-    # 0) Remove only handlers we manage (need handler._keep = True)
+    # 0) Remove the handlers managed in the core SDK (else use handler._keep = True)
     for handler in list(logger.handlers):
         if getattr(handler, "_keep", False):
             continue
@@ -181,37 +181,37 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
     log_level = getattr(logging, logger_cfg.get("log_level", "DEBUG").upper(), logging.DEBUG)
     logger.setLevel(log_level)
 
-    # 2) If no handlers yet, attach console/file
-    if not logger.handlers:
-        
-        # console
-        if logger_cfg.get("enable_console_log", True):
-            
-            console_log_format = logger_cfg.get("console_log_format", LOG_FORMAT_CONSOLE)
-            date_format = logger_cfg.get("date_format")
-            
-            console_handler = SafeStreamHandler(sys.stdout)
-            console_handler.setFormatter(TextFormatter(console_log_format, date_format, logger_cfg.get("log_keys")))
-            logger.addHandler(console_handler)
+    # 2) Attach console/file handlers according to config.
+    #     Do NOT gate this on "logger.handlers" because external handlers
 
-        # file
-        if logger_cfg.get("enable_file_log", False):
-            
-            log_dir = logger_cfg.get("log_file_path", "")
-            if log_dir and not os.path.isdir(log_dir):
-                os.makedirs(log_dir, exist_ok=True)
-            
-            safe_name = logger.name.replace(".", "_")
-            path = os.path.join(log_dir or ".", f"{safe_name}.log")
-            
-            max_file_size   = logger_cfg.get("max_file_size", 1_000_000)
-            backup_count    = logger_cfg.get("backup_count", 3)
-            log_format      = logger_cfg.get("log_format", LOG_FORMAT)
-            date_format     = logger_cfg.get("date_format")
+    # console
+    if logger_cfg.get("enable_console_log", True):
 
-            file_handler = RotatingFileHandler(path, maxBytes=max_file_size, backupCount=backup_count)
-            if logger_cfg.get("enable_json_log", False):
-                file_handler.setFormatter(JsonFormatter(log_format, date_format, logger_cfg.get("log_keys")))
-            else:
-                file_handler.setFormatter(TextFormatter(log_format, date_format, logger_cfg.get("log_keys")))
-            logger.addHandler(file_handler)
+        console_log_format = logger_cfg.get("console_log_format", LOG_FORMAT_CONSOLE)
+        date_format = logger_cfg.get("date_format")
+
+        console_handler = SafeStreamHandler(sys.stdout)
+        console_handler.setFormatter(TextFormatter(console_log_format, date_format, logger_cfg.get("log_keys")))
+        logger.addHandler(console_handler)
+
+    # file
+    if logger_cfg.get("enable_file_log", False):
+
+        log_dir = logger_cfg.get("log_file_path", "")
+        if log_dir and not os.path.isdir(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+
+        safe_name = logger.name.replace(".", "_")
+        path = os.path.join(log_dir or ".", f"{safe_name}.log")
+
+        max_file_size   = logger_cfg.get("max_file_size", 1_000_000)
+        backup_count    = logger_cfg.get("backup_count", 3)
+        log_format      = logger_cfg.get("log_format", LOG_FORMAT)
+        date_format     = logger_cfg.get("date_format")
+
+        file_handler = RotatingFileHandler(path, maxBytes=max_file_size, backupCount=backup_count)
+        if logger_cfg.get("enable_json_log", False):
+            file_handler.setFormatter(JsonFormatter(log_format, date_format, logger_cfg.get("log_keys")))
+        else:
+            file_handler.setFormatter(TextFormatter(log_format, date_format, logger_cfg.get("log_keys")))
+        logger.addHandler(file_handler)
