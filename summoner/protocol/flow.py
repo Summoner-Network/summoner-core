@@ -1,3 +1,4 @@
+from __future__ import annotations
 import re
 from collections.abc import Callable
 from typing import Optional, Any
@@ -51,9 +52,12 @@ def get_token_list(input_string: str, separator: str) -> list[str]:
 
 Unpack = Callable[[re.Match[str]], tuple[str, str, str]]
 
+# dynamic Trigger class returned by load_triggers()
+TriggerType = type
+
 class Flow:
     
-    def __init__(self, triggers_file: Optional[str] = None):
+    def __init__(self, triggers_file: Optional[str] = None) -> None:
         self.triggers_file = triggers_file
         self.in_use: bool = False
         self.arrows: set[ArrowStyle] = set()
@@ -61,31 +65,32 @@ class Flow:
         self._regex_ready: bool = False
         self._regex_patterns: list[tuple[re.Pattern[str], ArrowStyle, Unpack]] = []
     
-    def activate(self):
+    def activate(self) -> Flow:
         self.in_use = True
         return self
 
-    def deactivate(self):
+    def deactivate(self) -> Flow:
         self.in_use = False
         return self
 
-    def add_arrow_style(self,
-                        stem: str,
-                        brackets: tuple[str, str],
-                        separator: str,
-                        tip: str
-                        ):
+    def add_arrow_style(
+        self,
+        stem: str,
+        brackets: tuple[str, str],
+        separator: str,
+        tip: str
+    ) -> None:
         style = ArrowStyle(
             stem=stem,
             brackets=brackets,
             separator=separator,
             tip=tip
-            )
+        )
         self.arrows.add(style)
         self._regex_ready = False
         self._regex_patterns.clear()
 
-    def triggers(self, json_dict: Optional[dict[str, Any]] = None):
+    def triggers(self, json_dict: Optional[dict[str, Any]] = None) -> TriggerType:
         if json_dict is None: 
             if self.triggers_file is None:
                 # use the file TRIGGERS
@@ -95,7 +100,13 @@ class Flow:
         else:
             return load_triggers(json_dict=json_dict)
 
-    def _build_labeled_complete(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
+    def _build_labeled_complete(
+        self,
+        base: str,
+        left_bracket: str,
+        right_bracket: str,
+        tip: str
+    ) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -106,7 +117,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_complete(self, base, tip) -> re.Pattern[str]:
+    def _build_unlabeled_complete(self, base: str, tip: str) -> re.Pattern[str]:
         arrow  = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -115,7 +126,13 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
     
-    def _build_labeled_dangling_right(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
+    def _build_labeled_dangling_right(
+        self,
+        base: str,
+        left_bracket: str,
+        right_bracket: str,
+        tip: str
+    ) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -125,7 +142,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_dangling_right(self, base, tip) -> re.Pattern[str]:
+    def _build_unlabeled_dangling_right(self, base: str, tip: str) -> re.Pattern[str]:
         arrow  = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -133,7 +150,13 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
     
-    def _build_labeled_dangling_left(self, base, left_bracket, right_bracket, tip) -> re.Pattern[str]:
+    def _build_labeled_dangling_left(
+        self,
+        base: str,
+        left_bracket: str,
+        right_bracket: str,
+        tip: str
+    ) -> re.Pattern[str]:
         left  = rf"{base}{left_bracket}"
         right = rf"{right_bracket}{base}{tip}"
         regex = rf"""
@@ -144,7 +167,7 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
-    def _build_unlabeled_dangling_left(self, base, tip) -> re.Pattern[str]:
+    def _build_unlabeled_dangling_left(self, base: str, tip: str) -> re.Pattern[str]:
         arrow = rf"{base}{tip}"
         regex = rf"""
             ^\s*
@@ -153,26 +176,29 @@ class Flow:
         """
         return re.compile(regex, re.VERBOSE)
 
+    def _unpack_labeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
+        return (
+            matched_pattern.group("source"),
+            matched_pattern.group("label"),
+            matched_pattern.group("target"),
+        )
 
-    def _unpack_labeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
-        return matched_pattern.group("source"), matched_pattern.group("label"), matched_pattern.group("target")
-
-    def _unpack_unlabeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
+    def _unpack_unlabeled_complete(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
         return matched_pattern.group("source"), "", matched_pattern.group("target")
     
-    def _unpack_labeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
+    def _unpack_labeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
         return matched_pattern.group("source"), matched_pattern.group("label"), ""
     
-    def _unpack_unlabeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
+    def _unpack_unlabeled_dangling_right(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
         return matched_pattern.group("source"), "", ""
     
-    def _unpack_labeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
+    def _unpack_labeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
         return "", matched_pattern.group("label"), matched_pattern.group("target")
 
-    def _unpack_unlabeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str,str,str]:
+    def _unpack_unlabeled_dangling_left(self, matched_pattern: re.Match[str]) -> tuple[str, str, str]:
         return "", "", matched_pattern.group("target")
 
-    def _prepare_regex(self):
+    def _prepare_regex(self) -> None:
         if self._regex_ready:
             return
 
@@ -191,7 +217,7 @@ class Flow:
             pattern_complex_dangling = self._build_labeled_dangling_right(base, left_bracket, right_bracket, tip)
             self._regex_patterns.append((pattern_complex_dangling, style, self._unpack_labeled_dangling_right))
 
-            # unlabeld
+            # unlabeled
             pattern_simple_complete = self._build_unlabeled_complete(base, tip)
             self._regex_patterns.append((pattern_simple_complete, style, self._unpack_unlabeled_complete))
 
@@ -203,7 +229,7 @@ class Flow:
 
         self._regex_ready = True
 
-    def _validate_tokens(self, tokens: list[str], text: str):
+    def _validate_tokens(self, tokens: list[str], text: str) -> None:
         for token in tokens:
             if not _TOKEN_RE.match(token):
                 raise ValueError(f"Invalid token {token!r} in route {text!r}")
@@ -217,10 +243,10 @@ class Flow:
             source=tuple(Node(tok) for tok in source_list),
             label=(),
             target=(),
-            style=None
-    )
+            style=None,
+        )
 
-    def compile_arrow_patterns(self):
+    def compile_arrow_patterns(self) -> None:
         """
         Compile (or recompile) regex patterns from the current arrow styles.
         Safe to call multiple times; no effect if already compiled.
@@ -228,9 +254,11 @@ class Flow:
         if self.in_use:
             self._prepare_regex()
 
-    @deprecated("Flow.ready() is deprecated. Use Flow.compile_arrow_patterns() instead. "
-                "When using SummonerClient, patterns are compiled automatically during registration.")
-    def ready(self):
+    @deprecated(
+        "Flow.ready() is deprecated. Use Flow.compile_arrow_patterns() instead. "
+        "When using SummonerClient, patterns are compiled automatically during registration."
+    )
+    def ready(self) -> None:
         warnings.warn(
             "Flow.ready() is deprecated; use Flow.compile_arrow_patterns() instead. "
             "In SummonerClient, you generally don't need to call this.",
