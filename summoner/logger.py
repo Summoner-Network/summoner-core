@@ -171,8 +171,10 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
       - backup_count (int)
       - log_keys (list[str] or None)
     """
-    # 0) Remove any existing handlers
+    # 0) Remove only handlers we manage (need handler._keep = True)
     for handler in list(logger.handlers):
+        if getattr(handler, "_keep", False):
+            continue
         logger.removeHandler(handler)
 
     # 1) Set the logger's level once
