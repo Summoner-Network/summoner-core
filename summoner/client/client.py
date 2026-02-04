@@ -1501,13 +1501,12 @@ class SummonerClient:
                     f"({stage}) retry {attempts} of "
                     f"{limit if limit is not None else '∞'}; "
                     f"sleeping {self.retry_delay_seconds}s",
-                    exc_info=True
                 )
                 await asyncio.sleep(self.retry_delay_seconds)
 
             # Check retry limit
             if (limit is not None and attempts >= limit):
-                self.logger.error(f"{stage} retry limit reached ({limit})", exc_info=True)
+                self.logger.error(f"{stage} retry limit reached ({limit})")
                 return False
 
     async def _get_client_intent(self) -> ClientIntent:
