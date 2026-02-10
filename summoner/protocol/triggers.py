@@ -130,7 +130,7 @@ def parse_signal_tree_lines(lines: list[str], tabsize: int = 8) -> dict[str, Any
     return root
 
 
-def parse_signal_tree(filepath: str, tabsize: int = 8) -> dict[str, Any]:
+def parse_signal_tree(filepath: Path | str, tabsize: int = 8) -> dict[str, Any]:
     """
     Read a file and parse it into a nested dict tree.
     This is the second entry point, for file-based input.
@@ -272,19 +272,30 @@ def load_triggers(
     `json_dict` must match the nested structure output by `parse_signal_tree_lines`.
 
     Raises FileNotFoundError with clear message if file is missing.
+    Raises ValueError with message as in `parse_signal_tree_lines` and `build_triggers`
+        if any of the lines in the text or the file are malformed.
     """
-    try:
-        if text is not None:
-            lines = text.splitlines()
-            tree = parse_signal_tree_lines(lines)
-        elif json_dict is not None:
-            tree = dict(json_dict)  # shallow copy to avoid mutation
-        else:
-            path = WORKING_DIR / triggers_file
-            tree = parse_signal_tree(path)
-    except FileNotFoundError as e:
-        raise FileNotFoundError(
-            f"Could not find triggers file at {path if 'path' in locals() else '<provided text or dict>'}"
-        ) from e
+    if text is not None:
+        lines = text.splitlines()
+        # This below can raise ValueError
+        tree = parse_signal_tree_lines(lines)
+    elif json_dict is not None:
+        tree = dict(json_dict)
+    else:
+        path = ""
+        try:
+            if triggers_file is not None:
+                # In this case triggers_file was either provided as str
+                #   or left out completely and the default is being used.
+                path = WORKING_DIR / triggers_file
+            else:
+                # In this case triggers_file was explicitly provided as None
+                path = WORKING_DIR / "TRIGGERS"
+                raise FileNotFoundError("no triggers file and weren't using the default either")
+            # This below can raise ValueError or FileNotFoundError
+            tree =parse_signal_tree(path)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Could not find triggers file at {path if 'path' in locals() else '<provided text or dict>'}"
+            ) from e
     return build_triggers(tree)
-
