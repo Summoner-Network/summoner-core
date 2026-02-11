@@ -120,13 +120,23 @@ class SummonerClient:
         self._upload_states: Optional[Callable[[Any], Awaitable]] = None
         self._download_states: Optional[Callable[[Any], Awaitable]] = None
 
+        # Sender HyperParameters
         self.event_bridge_maxsize = None
         self.max_concurrent_workers = None # Limit the sending rate (will use 50 if None is given)
         self.send_queue_maxsize = None
+        self.batch_drain = None
+        # self.max_consecutive_worker_errors is unbound until _apply_config
+
+        # Receiver HyperParameters
         self.max_bytes_per_line = None
         self.read_timeout_seconds = None # None is prefered
+        
+        # Reconnction HyperParameters
         self.retry_delay_seconds = None
-        self.batch_drain = None
+        # self.primary_retry_limit is unbound until _apply_config
+        # self.default_host is unbound until _apply_config
+        # self.default_port is unbound until _apply_config
+        # self.default_retry_limit is unbound until _apply_config
 
         # Pass Event information from the receiving end to the sending end
         self.event_bridge: Optional[asyncio.Queue[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]] = None
