@@ -8,8 +8,10 @@ from summoner.utils import (
     ensure_trailing_newline,
     )
 
-# Current envelope version
-WRAPPER_VERSION = "0.0.1"
+from summoner._version import core_version
+
+# Default envelope version
+DEFAULT_VERSION = "0.0.1"
 
 # Registries for versioned parsers and casters
 envelope_parsers: Dict[str, Any] = {}
@@ -156,12 +158,13 @@ register_envelope_version("0.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.0", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.1.0", parse_v0_0_1, cast_v0_0_1)
-register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
+# register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
+register_envelope_version(core_version, parse_v0_0_1, cast_v0_0_1)
 
 
 def wrap_with_types(
     payload: Any,
-    version: str = WRAPPER_VERSION
+    version: str = DEFAULT_VERSION
 ) -> str:
     """
     Wrap `payload` in a self-describing JSON envelope with type metadata.
@@ -173,7 +176,7 @@ def wrap_with_types(
 
     Args:
         payload: Any JSON-serializable object (dict, list, primitive).
-        version: Version string for the envelope format (defaults to WRAPPER_VERSION).
+        version: Version string for the envelope format (defaults to DEFAULT_VERSION).
 
     Returns:
         A JSON string representing the typed envelope.
@@ -266,7 +269,7 @@ def recover_with_types(text: str) -> RelayedMessage:
 
     # 4) We have the versioned envelope—now look up the correct caster
     version = content["_version"]
-    caster  = envelope_casters.get(version, envelope_casters[WRAPPER_VERSION])
+    caster  = envelope_casters.get(version, envelope_casters[DEFAULT_VERSION])
     if caster is None:
         # Unknown version: hard error so we don't silently mis-interpret data
         raise ValueError(f"Unsupported wrapper version: {version}")

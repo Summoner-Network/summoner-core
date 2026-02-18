@@ -2,5 +2,16 @@
 requires = ["setuptools>=62.3.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "summoner"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = { attr = "summoner._version.core_version" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["summoner*"]
+
 [tool.setuptools.package-data]
 "*" = ["**/*.css", "**/*.js"]
