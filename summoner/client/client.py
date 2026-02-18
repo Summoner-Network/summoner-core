@@ -57,7 +57,7 @@ from summoner.protocol.payload import (
     RelayedMessage
 )
 
-from summoner._version import core_version
+from summoner._version import __version__ as core_version
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""

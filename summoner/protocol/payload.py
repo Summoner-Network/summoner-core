@@ -8,7 +8,7 @@ from summoner.utils import (
     ensure_trailing_newline,
     )
 
-from summoner._version import core_version
+from summoner._version import __version__ as core_version
 
 # Default envelope version
 DEFAULT_VERSION = "0.0.1"
