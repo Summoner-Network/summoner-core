@@ -57,6 +57,8 @@ from summoner.protocol.payload import (
     RelayedMessage
 )
 
+from summoner._version import __version__ as core_version
+
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
     pass
@@ -74,7 +76,7 @@ class SummonerClient:
     DEFAULT_EVENT_BRIDGE_SIZE = 1000
     DEFAULT_MAX_CONSECUTIVE_ERRORS = 3          # Failed attempts to send before disconnecting
 
-    core_version = "1.1.1"
+    core_version = core_version
 
     def __init__(self, name: Optional[str] = None):
         

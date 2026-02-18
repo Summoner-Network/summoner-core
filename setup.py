@@ -1,8 +1,13 @@
 from setuptools import setup, find_packages
 
+# Read version without importing the package (safe for builds)
+version_ns = {}
+with open("summoner/_version.py", encoding="utf-8") as f:
+    exec(f.read(), version_ns)
+
 setup(
     name="summoner",
-    version="0.1.0",
+    version=version_ns["__version__"],
     description="Summoner's core SDK",
     author="Remy Tuyeras",
     author_email="rtuyeras@summoner.org",
