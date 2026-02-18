@@ -1436,8 +1436,8 @@ class SummonerClient:
 
                 # Deregister this session and its children from active tasks
                 async with self.tasks_lock:
-                    if task is not None:
-                        self.active_tasks.discard(task)
+                    if current_task is not None:
+                        self.active_tasks.discard(current_task)
 
             # Check whether we should quit or loop back to travel to the next server (agent migration)
             async with self.connection_lock:
@@ -1459,7 +1459,21 @@ class SummonerClient:
         """
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
-                self.loop.add_signal_handler(sig, lambda: self.shutdown())
+                self.loop.add_signal_handler(sig, self.shutdown)
+        else:
+            def _handler(sig, frame):
+                # thread-safe: schedule shutdown on the event loop
+                try:
+                    self.loop.call_soon_threadsafe(self.shutdown)
+                except RuntimeError:
+                    pass
+            signal.signal(signal.SIGINT, _handler)
+            # SIGTERM exists on Windows in Python, but behavior varies by launcher
+            if hasattr(signal, "SIGTERM"):
+                try:
+                    signal.signal(signal.SIGTERM, _handler)
+                except Exception:
+                    pass
 
     async def _wait_for_registration(self):
         """
