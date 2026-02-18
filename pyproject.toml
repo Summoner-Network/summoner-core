@@ -1,6 +1,13 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=62.3.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "summoner"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = { attr = "summoner.client.client.SummonerClient.core_version" }
 
 [tool.setuptools.package-data]
 "*" = ["**/*.css", "**/*.js"]
