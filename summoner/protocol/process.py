@@ -1,7 +1,11 @@
+"""
+TODO: doc process
+"""
+
 from __future__ import annotations
 import re
 from collections import defaultdict
-from typing import Type, Any, Optional, Union, Callable, Awaitable
+from typing import Dict, List, Literal, Tuple, Type, Any, Optional, Union, Callable, Awaitable
 from enum import Enum, auto
 from dataclasses import dataclass
 from .triggers import Signal, Event, Action, extract_signal
@@ -18,38 +22,43 @@ _ONEOF_RE = re.compile(r"^/oneof\(\s*([^)]*?)\s*\)$")
 # Wildcard sentinel for dispatch
 _WILDCARD = object()
 
+KindType = Literal["all", "not", "oneof", "plain"]
+
 class Node:
+    """
+    TODO: doc node
+    """
     __slots__ = ('expr', 'kind', 'values')
 
     def __init__(self, expr: str) -> None:
         _expr: str = expr.strip()
-        self.kind:  str
+        self.kind:  KindType
         self.values: Optional[tuple[str,...]]
 
         if _ALL_RE.fullmatch(_expr):
             self.kind = 'all'
             self.values = None
-        
+
         elif (found_match := _NOT_RE.fullmatch(_expr)):
             self.kind = 'not'
             items = [item.strip() for item in found_match.group(1).split(',') if item.strip()]
             self.values = tuple(items)
-        
+
         elif (found_match := _ONEOF_RE.fullmatch(_expr)):
             self.kind = 'oneof'
             items = [item.strip() for item in found_match.group(1).split(',') if item.strip()]
             self.values = tuple(items)
-        
+
         elif _PLAIN_TOKEN_RE.fullmatch(_expr):
             self.kind = 'plain'
-            self.values = (_expr,)  
-        
+            self.values = (_expr,)
+
         else:
             raise ValueError(f"Invalid syntax for token: {_expr!r}")
 
     def __eq__(self, other: Any) -> bool:
         return (
-            isinstance(other, Node) and 
+            isinstance(other, Node) and
             self.kind == other.kind and
             self.values == other.values
         )
@@ -65,49 +74,56 @@ class Node:
             # f"\033[94mvalues\033[0m=\033[90m{self.values!r}\033[0m)"
         )
 
+    #pylint:disable=too-many-return-statements
     def __str__(self) -> str:
         try:
             if self.kind == 'all':
                 return '/all'
-            elif self.kind == 'plain':
+            if self.kind == 'plain':
                 if self.values is None:
-                    return f"<Invalid Node>"
+                    return "<Invalid Node>"
                 return self.values[0]
-            elif self.kind == 'not':
+            if self.kind == 'not':
                 if self.values is None:
-                    return f"<Invalid Node>"
+                    return "<Invalid Node>"
                 return f"/not({','.join(self.values)})"
-            elif self.kind == 'oneof':
+            if self.kind == 'oneof':
                 if self.values is None:
-                    return f"<Invalid Node>"
+                    return "<Invalid Node>"
                 return f"/oneof({','.join(self.values)})"
-            else:
-                return f"<Unknown Node kind: {self.kind!r}>"
-        except Exception as e:
+            return f"<Unknown Node kind: {self.kind!r}>"
+        except Exception as e: # pylint:disable=broad-exception-caught
             return f"<Invalid Node: {e}>"
 
     def accepts(self, state: Node) -> bool:
-        if not isinstance(state, Node): 
+        """
+        Handle the logic of whether this Node
+        accepts state or not.
+        In the plain case it is matching,
+        but there is also the logic of oneof, all, not kinds on either
+        operand.
+        """
+        if not isinstance(state, Node):
             raise TypeError(f"Argument `state` must be Node; {state} provided")
-        
-        table = {
+
+        table : Dict[Tuple[KindType | object, KindType | object], Callable[[Node,Node],bool]] = {
             ('all', 'all'): lambda g, s: True,
             ('all', _WILDCARD): lambda g, s: True,
             (_WILDCARD, 'all'): lambda g, s: True,
-            ('plain', 'plain'): lambda g, s: g.values[0] == s.values[0],
-            ('plain', 'not'):   lambda g, s: g.values[0] not in s.values,
-            ('plain', 'oneof'): lambda g, s: g.values[0] in s.values,
-            ('not', 'plain'):   lambda g, s: s.values[0] not in g.values,
+            ('plain', 'plain'): lambda g, s: g.values[0] == s.values[0], # type: ignore
+            ('plain', 'not'):   lambda g, s: g.values[0] not in s.values, # type: ignore
+            ('plain', 'oneof'): lambda g, s: g.values[0] in s.values, # type: ignore
+            ('not', 'plain'):   lambda g, s: s.values[0] not in g.values, # type: ignore
             ('not', _WILDCARD): lambda g, s: True,
-            ('oneof', 'plain'): lambda g, s: s.values[0] in g.values,
-            ('oneof', 'not'):   lambda g, s: bool(set(g.values) - set(s.values)),
-            ('oneof', 'oneof'): lambda g, s: bool(set(g.values) & set(s.values)),
+            ('oneof', 'plain'): lambda g, s: s.values[0] in g.values, # type: ignore
+            ('oneof', 'not'):   lambda g, s: bool(set(g.values) - set(s.values)), # type: ignore
+            ('oneof', 'oneof'): lambda g, s: bool(set(g.values) & set(s.values)), # type: ignore
         }
 
         for (gk, sk), fn in table.items():
             if (gk == self.kind or gk is _WILDCARD) and (sk == state.kind or sk is _WILDCARD):
                 return fn(self, state)
-            
+
         raise RuntimeError("Unhandled combination in Node.is_compatible_with")
 
 # ======= ARROW STYLE =======
@@ -211,6 +227,7 @@ class ArrowStyle:
             try:
                 re.escape(part)
             except re.error as e:
+                #pylint:disable=raise-missing-from
                 raise ValueError(
                     f"Part {part!r} invalid for regex: {e}"
                 )
@@ -218,6 +235,17 @@ class ArrowStyle:
 # ======= PARSED ROUTE =======
 
 class ParsedRoute:
+    """
+    A parsed route holds
+    all the sources, labels and targets for an arrow that has been parsed
+    As --[Bs,Cs]--> /all has
+    Node for As in source
+    Node for Bs and Node for Cs in label
+    Node for /all in target
+    
+    This is also for when it is not an arrow as in standalone when there
+    are only sources
+    """
     __slots__ = ('source', 'label', 'target', 'style', '_string')
 
     def __init__(
@@ -269,18 +297,30 @@ class ParsedRoute:
 
     @property
     def has_label(self) -> bool:
+        """
+        There are labels
+        """
         return bool(self.label)
 
     @property
     def is_arrow(self) -> bool:
+        """
+        This is actually an arrow, unlike the standalone only sources
+        """
         return bool(self.target) or self.has_label
 
     @property
     def is_object(self) -> bool:
+        """
+        It is standalone
+        """
         return not self.is_arrow
-    
+
     @property
     def is_initial(self) -> bool:
+        """
+        It is dangling on the left
+        """
         return self.is_arrow and not self.source
 
     def activated_nodes(
@@ -294,9 +334,8 @@ class ParsedRoute:
         if isinstance(event, Event) and event is not None and not self.is_arrow:
             if isinstance(event, Action.TEST):
                 return ()
-            else:
-                # standalone → only the source nodes
-                return self.source
+            # standalone → only the source nodes
+            return self.source
 
         # arrow route → pick based on the Action subtype
         if isinstance(event, Action.MOVE):
@@ -313,6 +352,9 @@ class ParsedRoute:
 
 @dataclass(frozen=True)
 class Sender:
+    """
+    TODO: doc sender
+    """
     __slots__ = ('fn', 'multi', 'actions', 'triggers')
     fn: Callable[[], Awaitable]
     multi: bool
@@ -320,30 +362,42 @@ class Sender:
     triggers: Optional[set[Signal]]
 
     def responds_to(self, event: Any) -> bool:
+        """
+        TODO: doc sender
+        """
         action_check = True
         if self.actions is not None:
             if not any(isinstance(event, action) for action in self.actions):
                 action_check = False
-            
+
         trigger_check = True
         if self.triggers is not None:
             if not any(extract_signal(event) == trig for trig in self.triggers):
                 trigger_check = False
-            
+
         return action_check and trigger_check
 
 @dataclass(frozen=True)
 class Receiver:
+    """
+    TODO: doc receiver
+    """
     __slots__ = ('fn', 'priority')
     fn: Callable[[Union[str, dict]], Awaitable[Optional[Event]]]
     priority: tuple[int, ...]
 
 class Direction(Enum):
+    """
+    Only two directions
+    """
     SEND = auto()
     RECEIVE = auto()
 
 @dataclass(frozen=True)
 class TapeActivation:
+    """
+    TODO: doc tape activation
+    """
     __slots__ = ('key', 'state', 'route', 'fn')
     key: Optional[str]
     state: Optional[Node]
@@ -353,12 +407,18 @@ class TapeActivation:
 # ======= STATE TAPE =======
 
 class TapeType(Enum):
+    """
+    TODO: doc tapetype
+    """
     SINGLE        = auto()
     MANY          = auto()
     INDEX_SINGLE  = auto()
     INDEX_MANY    = auto()
 
 class StateTape:
+    """
+    TODO: doc state tape
+    """
     __slots__ = ('states', '_type')
 
     prefix: str = "tape"
@@ -369,7 +429,7 @@ class StateTape:
 
         # Default: empty index-many
         if tp is None:
-            self.states = {}
+            self.states : Dict[str,List[Node]] = {}
             self._type  = TapeType.INDEX_MANY
 
         # Exactly SINGLE
@@ -405,11 +465,20 @@ class StateTape:
             raise RuntimeError(f"Unhandled TapeType {tp!r}")
 
     def set_type(self, value: TapeType) -> StateTape:
+        """
+        Change the type
+        """
         self._type = value
         return self
 
     @staticmethod
     def _assess_type(states: Any) -> Optional[TapeType]:
+        """
+        If there is only one state, SINGLE
+        If there is a list or tuple of many states, MANY
+        If there is a dictionary sending each Optional[str] key to a single state, INDEX_SINGLE
+        If there is a dictionary sending each Optional[str] key to possibly many states, INDEX_MANY
+        """
         # Scalar → SINGLE
         if isinstance(states, (str, Node)):
             return TapeType.SINGLE
@@ -430,6 +499,7 @@ class StateTape:
                 return TapeType.INDEX_SINGLE
 
             # all values are either scalar or sequence of scalars → INDEX_MANY
+            # but at least one of the values was actually a sequence
             if all(
                 isinstance(k, (str, type(None)))
                 and (
@@ -446,21 +516,36 @@ class StateTape:
         return None
 
     def _add_prefix(self, key: str, with_prefix: bool = True) -> str:
+        """
+        TODO: doc prefix
+        """
         return f"{self.prefix}:{key}" if with_prefix else key
 
     def _remove_str_prefix(self, key: str) -> str:
+        """
+        TODO: doc prefix
+        """
         p = f"{self.prefix}:"
         return key[len(p):] if key.startswith(p) else key
-    
+
     # The type annotation here is incorrect, key=None gives None
     # but making this Optional[str] in return
     # is not the intended behavior and pollutes that possibility
     # for the caller even when they are not passing key=None
     def _remove_prefix(self, key: Optional[str]) -> str:
+        """
+        TODO: doc prefix
+        """
         p = f"{self.prefix}:"
         return key[len(p):] if isinstance(key, str) and key.startswith(p) else key # type: ignore
 
     def extend(self, states: Any):
+        """
+        Merge in these new states with the current self.states
+        Creating a temporary StateTape handles the different ways
+        the new states can be presented as in __init__ rather than always being
+        a dictionary from strings to List[Node]
+        """
         # Delegate to a local StateTape then merge
         local_tape = StateTape(states, with_prefix=False)
         for k, nodes in local_tape.states.items():
@@ -468,10 +553,21 @@ class StateTape:
             self.states[k].extend(nodes)
 
     def refresh(self):
-        # Delegate to a fresh StateTape
-        return StateTape({key: [] for key in self.states.keys()}, with_prefix=False).set_type(self._type)
+        """
+        Delegate to a fresh StateTape
+        This has the same keys, but no more Nodes in the accompanying values
+        """
+        return StateTape(
+            {key: [] for key in self.states.keys()},
+            with_prefix=False
+        ).set_type(self._type)
 
     def revert(self) -> Union[list[Node], dict[str, list[Node]], None]:
+        """
+        The states as it was provided as the input to __init__
+        StateTape(revert(StateTape(states,remove_prefix=b)),remove_prefix=b)
+        goes back and forth
+        """
         # SINGLE or MANY → flatten to a single list
         if self._type in (TapeType.SINGLE, TapeType.MANY):
             out_list: list[Node] = []
@@ -491,9 +587,11 @@ class StateTape:
         return None
 
     def _nodeify(self, x: Union[str, Node]) -> Node:
-        # wrap raw strings into Node
+        """
+        wrap raw strings into Node
+        """
         return x if isinstance(x, Node) else Node(x)
-    
+
     def collect_activations(
         self,
         receiver_index: dict[str, Receiver],
@@ -502,7 +600,8 @@ class StateTape:
         """
         For each receiver, and each (key, state) in self.states,
         if the parsed route matches that state (or has no source),
-        record a TapeActivation(priority, key, state, route, fn).
+        record a priority: TapeActivation(key, state, route, fn)
+        key-value pair
         """
         activation_index: dict[tuple[int, ...], list[TapeActivation]] = defaultdict(list)
 
@@ -531,10 +630,10 @@ class StateTape:
 
 # ======= LIFE CYCLES =======
 
-from enum import Enum, auto
-
 class ClientIntent(Enum):
+    """
+    Life Cycles
+    """
     QUIT      = auto()   # brutal, immediate exit
     TRAVEL    = auto()   # switch to a new host/port
     ABORT  = auto()   # abort due to error
-

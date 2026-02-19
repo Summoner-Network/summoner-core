@@ -150,7 +150,7 @@ class JsonFormatter(BaseFormatter):
                        else {k: record.msg.get(k) for k in self.log_keys if k in record.msg})
         else:
             payload = record.getMessage()
-        base["message"] = payload
+        base["message"] = payload # type: ignore
         return json.dumps(base, default=str)
 
 def get_logger(name: str) -> logging.Logger:

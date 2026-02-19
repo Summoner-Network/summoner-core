@@ -1,9 +1,13 @@
+"""
+TODO: doc payload
+"""
+#pylint:disable=line-too-long
 import json
 from json import JSONDecodeError
 from typing import Any, Tuple, Dict, List, Union, TypedDict
 
 from summoner.utils import (
-    fully_recover_json, 
+    fully_recover_json,
     remove_last_newline,
     ensure_trailing_newline,
     )
@@ -29,9 +33,6 @@ def register_envelope_version(
     envelope_parsers[version] = parser
     envelope_casters[version]  = caster
 
-
-from typing import Any, Tuple, Dict, List
-
 STR_TYPE = "str"
 BOOL_TYPE = "bool"
 INT_TYPE = "int"
@@ -39,6 +40,7 @@ NUMB_TYPE = "float"
 NULL_TYPE = "null"
 
 
+#pylint:disable=too-many-return-statements
 def parse_v0_0_1(obj: Any) -> Tuple[Any, Any]:
     """
     Walk `obj` and build a parallel `type_tree`.  Every leaf in `obj`
@@ -89,6 +91,7 @@ def parse_v0_0_1(obj: Any) -> Tuple[Any, Any]:
     return s, STR_TYPE
 
 
+#pylint:disable=too-many-return-statements, too-many-branches
 def cast_v0_0_1(val: Any, expected: Any) -> Any:
     """
     Coerce `val` according to `expected`, but never fail on unknown types.

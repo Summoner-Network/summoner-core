@@ -9,6 +9,7 @@ import sys
 import json
 from typing import (
     Dict,
+    Generator,
     Optional,
     Callable,
     Union,
@@ -64,6 +65,8 @@ from summoner.protocol.payload import (
     recover_with_types,
     RelayedMessage
 )
+
+ANY_TO_AWAIT = Callable[[Any],Awaitable]
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
@@ -128,8 +131,8 @@ class SummonerClient:
         self._flow = Flow()
 
         # Functions to read and write the flow's active states in memory
-        self._upload_states: Optional[Callable[[Any], Awaitable]] = None
-        self._download_states: Optional[Callable[[Any], Awaitable]] = None
+        self._upload_states: Optional[ANY_TO_AWAIT] = None
+        self._download_states: Optional[ANY_TO_AWAIT] = None
 
         # Sender HyperParameters
         self.event_bridge_maxsize : Optional[int] = None
@@ -173,6 +176,7 @@ class SummonerClient:
 
     # ==== VERSION SPECIFIC ====
 
+    #pylint:disable=attribute-defined-outside-init
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
         """
         Given the config which says specific hyperparameters, set the corresponding
@@ -215,7 +219,6 @@ class SummonerClient:
             raise ValueError("sender.queue_maxsize must be an integer ≥ 1")
 
         if self.send_queue_maxsize < self.max_concurrent_workers:
-            #pylint:disable=logging-fstring-interpolation
             self.logger.warning(f"queue_maxsize < concurrency_limit; back-pressure will throttle producers at {self.send_queue_maxsize}")
 
     def initialize(self):
@@ -302,7 +305,7 @@ class SummonerClient:
         Decorator to supply a function that receives a StateTape.
         Must be used before client.run().
         """
-        def decorator(fn: Callable[[Any], Awaitable]):
+        def decorator(fn: ANY_TO_AWAIT):
 
             # ----[ Safety Checks ]----
 
@@ -1015,7 +1018,7 @@ class SummonerClient:
         """
 
         # ----[ Wrapper: Interpret Protocol-Only Errors as None ]----
-        async def _safe_call(fn: Callable[[Any], Awaitable], payload: Any) -> Any:
+        async def _safe_call(fn: ANY_TO_AWAIT, payload: Any) -> Any:
             try:
                 return await fn(payload)
             except BlockingIOError:
@@ -1097,7 +1100,7 @@ class SummonerClient:
                         continue
 
                     # ----[ Build: Organize Batches by Priority ]----
-                    batches: dict[tuple[int, ...], list[Callable[[Any], Awaitable]]] = {}
+                    batches: dict[tuple[int, ...], list[ANY_TO_AWAIT]] = {}
                     if self._flow.in_use:
                         raw_states = (await self._upload_states(payload)) if self._upload_states is not None else None
                         tape = StateTape(raw_states)
@@ -1363,7 +1366,9 @@ class SummonerClient:
                         elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or
                                    (sender.triggers and isinstance(sender.triggers, set))):
 
-                            sender_parsed_route = sender_parsed_routes.get(route) # type: ignore
+                            # self._flow_in_use so sender_parsed_routes is bound
+                            sender_parsed_routes = cast(Dict[str,ParsedRoute],sender_parsed_routes) # type: ignore
+                            sender_parsed_route = sender_parsed_routes.get(route)
                             if sender_parsed_route is None:
                                 continue
 
@@ -1496,7 +1501,7 @@ class SummonerClient:
                         await task
                     except ServerDisconnected as e:
                         # Propagate server-side disconnection to the reconnection handler
-                        raise ServerDisconnected(e)
+                        raise ServerDisconnected(e) #pylint:disable=raise-missing-from
                     except asyncio.CancelledError:
                         # Normal during shutdown; ignore
                         pass
@@ -1664,6 +1669,9 @@ class SummonerClient:
             config_path: Optional[str] = None,
             config_dict: Optional[dict[str, Any]] = None,
         ):
+        """
+        TODO: doc run
+        """
         try:
 
             if config_dict is None:
@@ -1708,3 +1716,15 @@ class SummonerClient:
 
             self.loop.close()
             self.logger.info("Client exited cleanly.")
+
+    def _view_candidates(self) -> Generator[Optional[Callable[[Any], Awaitable]],None,None]:
+        if self._upload_states is not None:
+            yield self._upload_states
+        if self._download_states is not None:
+            yield self._download_states
+        for d in self._dna_receivers:
+            yield d.get("fn") # type: ignore
+        for d in self._dna_senders:
+            yield d.get("fn") # type: ignore
+        for d in self._dna_hooks:
+            yield d.get("fn") # type: ignore

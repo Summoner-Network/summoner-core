@@ -1,17 +1,20 @@
+"""
+TODO: summary of triggers, process and flow
+"""
 from .triggers import (
-    Signal, 
-    Event, 
+    Signal,
+    Event,
     Action,
     Move,
     Stay,
     Test,
     )
 from .process import (
-    StateTape, 
-    ParsedRoute, 
-    Node, 
-    Sender, 
-    Receiver, 
+    StateTape,
+    ParsedRoute,
+    Node,
+    Sender,
+    Receiver,
     Direction,
     )
 from .flow import Flow

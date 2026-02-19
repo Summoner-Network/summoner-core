@@ -117,7 +117,9 @@ def parse_signal_tree_lines(lines: list[str], tabsize: int = 8) -> dict[str, Any
 
         parent = nodes_by_depth[depth]
         if name in parent:
-            raise ValueError(f"Line {lineno}: duplicate signal name {name!r} at indent level {indent}")
+            raise ValueError(
+                f"Line {lineno}: duplicate signal name {name!r} at indent level {indent}"
+            )
         parent[name] = {}
 
         # 3) Trim nodes_by_depth so we don't keep stale deeper dicts
@@ -141,6 +143,11 @@ def parse_signal_tree(filepath: Path | str, tabsize: int = 8) -> dict[str, Any]:
 
 
 class Signal:
+    """
+    Keep track of position in a tree
+    via the path followed.
+    Allowing comparison by the ancestor relationship.
+    """
     __slots__ = ("_path", "_name")
     def __init__(self, path: tuple[int, ...], name: str):
         self._path = path
@@ -148,10 +155,16 @@ class Signal:
 
     @property
     def path(self) -> tuple[int, ...]:
+        """
+        The path in the tree from the root
+        """
         return self._path
 
     @property
     def name(self) -> str:
+        """
+        The name of this Signal
+        """
         return self._name
 
     def __gt__(self, other):
@@ -159,7 +172,7 @@ class Signal:
             return NotImplemented
         a, b = self._path, other._path
         return len(a) < len(b) and b[:len(a)] == a
-    
+
     def __lt__(self, other):
         return other > self
 
@@ -167,7 +180,7 @@ class Signal:
         if not isinstance(other, Signal):
             return NotImplemented
         return self._path == other._path or self > other
-    
+
     def __le__(self, other):
         return other >= self
 
@@ -184,6 +197,9 @@ class Signal:
 
 
 def build_triggers(tree: dict[str, Any]):
+    """
+    TODO: doc Trigger
+    """
     name_to_path: dict[str, tuple[int, ...]] = {}
     path_to_name: dict[tuple[int, ...], str] = {}
 
@@ -215,13 +231,17 @@ def build_triggers(tree: dict[str, Any]):
     def name_of(*args):
         """Get signal name from tuple (or *args)."""
         return path_to_name.get(tuple(args))
-    
+
     attrs["name_of"] = staticmethod(name_of)
 
     return type("Trigger", (), attrs)
 
 
+#pylint:disable=too-few-public-methods
 class Event:
+    """
+    TODO: doc event
+    """
     __slots__ = ("signal",)
     def __init__(self, signal: Signal) -> None:
         self.signal = signal
@@ -229,36 +249,54 @@ class Event:
         return f"{type(self).__name__}({self.signal!r})"
 
 
-class Move(Event): pass
-class Stay(Event): pass
+class Move(Event):
+    """
+    TODO: doc move event
+    activated_nodes
+    """
+class Stay(Event):
+    """
+    TODO: doc stay event
+    activated_nodes
+    """
 class Test(Event):
+    """
+    TODO: test event
+    activated_nodes
+    """
     __test__ = False
-    pass
+
 
 
 class Action:
+    """
+    TODO: doc in activation_nodes
+    """
     MOVE = Move
     STAY = Stay
     TEST = Test
 
 
 def extract_signal(trigger):
+    """
+    Just the signal part.
+    Handling if it was wrapped up in an event or not
+    """
     if isinstance(trigger, Event):
         return trigger.signal
-    elif isinstance(trigger, Signal):
+    if isinstance(trigger, Signal):
         return trigger
-    elif trigger is None:
+    if trigger is None:
         return None
-    else:
-        raise TypeError(f"Cannot extract signal from object of type {type(trigger).__name__!r}")
-     
+    raise TypeError(f"Cannot extract signal from object of type {type(trigger).__name__!r}")
+
 
 # the file TRIGGERS needs to be next to the code for the client, hence sys.argv[0]
 WORKING_DIR = Path(sys.argv[0]).resolve().parent
 
 def load_triggers(
         triggers_file: Optional[str] = "TRIGGERS",
-        text: Optional[str] = None, 
+        text: Optional[str] = None,
         json_dict: Optional[dict[str, Any]] = None
         ):
     """
@@ -291,10 +329,13 @@ def load_triggers(
             else:
                 # In this case triggers_file was explicitly provided as None
                 path = WORKING_DIR / "TRIGGERS"
-                raise FileNotFoundError("no triggers file and weren't using the default either")
+                raise FileNotFoundError(
+                    "no triggers file and weren't using the default either"
+                )
             # This below can raise ValueError or FileNotFoundError
             tree =parse_signal_tree(path)
         except FileNotFoundError as e:
+            #pylint:disable=line-too-long
             raise FileNotFoundError(
                 f"Could not find triggers file at {path if 'path' in locals() else '<provided text or dict>'}"
             ) from e

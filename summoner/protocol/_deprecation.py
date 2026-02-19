@@ -1,3 +1,6 @@
+"""
+Warnings about using deprecated methods 
+"""
 try:
     from warnings import deprecated  # Python 3.13+
 except ImportError:

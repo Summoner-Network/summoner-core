@@ -1,27 +1,33 @@
+"""
+TODO: doc validation
+"""
 import os
 import sys
 from typing import (
-    Union, 
-    get_type_hints, 
-    get_origin, 
+    Union,
+    get_type_hints,
+    get_origin,
     get_args,
     )
 import inspect
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
+#pylint:disable=wrong-import-position
 from summoner.logger import Logger
 
 
 
 def hook_priority_order(priority: tuple) -> tuple:
-    
+    """
+    TODO: doc hook_priority
+    """
+
     if priority != () and isinstance(priority[0], str):
         # SDK priority: sort first, e.g., ('aurora', 0) → (0, 'aurora', 0)
         return (0, priority)
-    else:
-        # User priority: sort after SDK, e.g., (0, 1) → (1, 0, 1)
-        return (1, priority)
+    # User priority: sort after SDK, e.g., (0, 1) → (1, 0, 1)
+    return (1, priority)
 
 def _normalize_annotation(raw):
     """
@@ -58,16 +64,19 @@ def _check_param_and_return(fn,
     # parameter check
     params = list(sig.parameters.values())
 
-    expected_params = 1 if decorator_name in ("@hook", "@receive", "@upload_states", "@download_states") else 0
-    
+    expected_params = 1 if decorator_name in \
+        ("@hook", "@receive", "@upload_states", "@download_states") else 0
+
     if len(params) != expected_params:
         raise TypeError(f"{decorator_name} '{fn.__name__}' must have "
                         f"{expected_params} parameter(s), not {len(params)}")
 
     if expected_params == 1:
         raw_param = params[0].annotation
-        param_hint = _normalize_annotation(raw_param) or hints.get(params[0].name, None)
+        param_hint = _normalize_annotation(raw_param) or \
+            hints.get(params[0].name, None)
         if param_hint is None:
+            #pylint:disable=line-too-long
             logger.warning(
                 f"{decorator_name} '{fn.__name__}' missing parameter annotation; skipping type check"
             )

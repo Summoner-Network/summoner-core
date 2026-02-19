@@ -47,7 +47,8 @@ Both classes execute code from DNA via exec() and eval():
 This is intended for trusted DNA (typically produced by your own agents).
 Do not run untrusted DNA.
 """
-#pylint:disable=line-too-long
+#pylint:disable=line-too-long, too-many-lines, wrong-import-position
+#pylint:disable=invalid-name, broad-exception-caught,logging-fstring-interpolation
 
 from importlib import import_module
 from typing import Optional, Any
@@ -60,7 +61,8 @@ import re
 import json
 import uuid
 
-import os, sys
+import os
+import sys
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
@@ -185,6 +187,7 @@ class ClientMerger(SummonerClient):
     This class executes trusted code from DNA via exec()/eval(). Do not run untrusted DNA.
     """
 
+    # pylint:disable=too-many-arguments, too-many-positional-arguments
     def __init__(
         self,
         named_clients: list[Any],  # backward compatible: list[dict] or list[SummonerClient] or list[dna_list]
@@ -228,6 +231,7 @@ class ClientMerger(SummonerClient):
     # Source normalization
     # ----------------------------
 
+    #pylint:disable=too-many-branches
     def _normalize_source(self, entry: Any, idx: int) -> dict[str, Any]:
         """
         Normalize a user-provided source specification into a canonical dict.
@@ -351,7 +355,9 @@ class ClientMerger(SummonerClient):
             The inferred binding name, or None if not found.
         """
         # Look for a module-global name whose value is exactly `client`
+        # TODO: can use _view_candidates instead of building a list
         candidates = []
+        #pylint:disable=protected-access
         if client._upload_states is not None:
             candidates.append(client._upload_states)
         if client._download_states is not None:
@@ -403,6 +409,7 @@ class ClientMerger(SummonerClient):
             client: SummonerClient = src["client"]
             var_name: str = src["var_name"]
 
+            #pylint:disable=protected-access
             tasks = list(client._registration_tasks or [])
             loop = client.loop
 
@@ -448,12 +455,14 @@ class ClientMerger(SummonerClient):
 
             # 4) clear list
             with suppress(Exception):
+                #pylint:disable=protected-access
                 client._registration_tasks.clear()
 
     # ----------------------------
     # Context application (DNA)
     # ----------------------------
 
+    # pylint:disable=too-many-branches
     def _apply_context(self, ctx: Optional[dict], g: dict, *, label: str) -> dict[str, Any]:
         """
         Apply a DNA context entry (imports, globals, recipes) into a sandbox globals dict.
@@ -495,6 +504,7 @@ class ClientMerger(SummonerClient):
                 continue
 
             try:
+                # pylint:disable=exec-used
                 exec(line, g)
                 report["succeeded"].append(line)
                 if self._verbose_context_imports:
@@ -517,6 +527,7 @@ class ClientMerger(SummonerClient):
                 if not (isinstance(k, str) and isinstance(expr, str)):
                     continue
                 try:
+                    # pylint:disable=eval-used
                     g.setdefault(k, eval(expr, g, {}))
                 except Exception as e:
                     self.logger.warning(f"[merge ctx:{label}] recipe failed {k}={expr!r} ({type(e).__name__}: {e})")
@@ -649,6 +660,7 @@ class ClientMerger(SummonerClient):
         if "__builtins__" not in g:
             g["__builtins__"] = __builtins__
 
+        # pylint:disable=exec-used
         exec(compile(func_body, filename=f"<{sandbox_name}>", mode="exec"), g)
 
         fn = g.get(fn_name)
@@ -668,6 +680,7 @@ class ClientMerger(SummonerClient):
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
                 var_name: str = src["var_name"]
+                #pylint:disable=protected-access
                 fn = client._upload_states
                 if fn is None:
                     continue
@@ -693,6 +706,7 @@ class ClientMerger(SummonerClient):
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
                 var_name: str = src["var_name"]
+                #pylint:disable=protected-access
                 fn = client._download_states
                 if fn is None:
                     continue
@@ -718,6 +732,7 @@ class ClientMerger(SummonerClient):
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
                 var_name: str = src["var_name"]
+                #pylint:disable=protected-access
                 for dna in client._dna_hooks:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
@@ -742,6 +757,7 @@ class ClientMerger(SummonerClient):
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
                 var_name: str = src["var_name"]
+                #pylint:disable=protected-access
                 for dna in client._dna_receivers:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
@@ -779,6 +795,7 @@ class ClientMerger(SummonerClient):
             if src["kind"] == "client":
                 client: SummonerClient = src["client"]
                 var_name: str = src["var_name"]
+                #pylint:disable=protected-access
                 for dna in client._dna_senders:
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
@@ -833,7 +850,7 @@ class ClientMerger(SummonerClient):
         self.initiate_receivers()
         self.initiate_senders()
 
-
+# pylint:disable=too-many-instance-attributes
 class ClientTranslation(SummonerClient):
     """
     Reconstruct a SummonerClient from its DNA list.
@@ -862,6 +879,7 @@ class ClientTranslation(SummonerClient):
     This class attempts to find and clean up such template clients so they do not leave
     pending registration tasks or open loops behind.
     """
+    # pylint:disable=too-many-arguments, too-many-positional-arguments
     def __init__(
         self,
         dna_list: list[dict[str, Any]],
@@ -875,7 +893,7 @@ class ClientTranslation(SummonerClient):
 
         if not isinstance(dna_list, list):
             raise TypeError("dna_list must be a list of DNA entries")
-        
+
         self._rebind_globals = dict(rebind_globals or {})
         self._allow_context_imports = allow_context_imports
         self._verbose_context_imports = verbose_context_imports
@@ -915,6 +933,7 @@ class ClientTranslation(SummonerClient):
         # Best-effort cleanup of template clients imported indirectly via DNA modules
         self._cleanup_template_clients_from_modules()
 
+    #pylint:disable=too-many-branches
     def _apply_context(self):
         """
         Apply optional "__context__" entry into the translation sandbox.
@@ -934,6 +953,7 @@ class ClientTranslation(SummonerClient):
             if not self._allow_context_imports:
                 continue
             try:
+                # pylint:disable=exec-used
                 exec(line, g)
                 if self._verbose_context_imports:
                     self.logger.info(f"[translation ctx] import ok: {line}")
@@ -954,11 +974,13 @@ class ClientTranslation(SummonerClient):
                 if not (isinstance(k, str) and isinstance(expr, str)):
                     continue
                 # eval in the sandbox global namespace
+                # pylint:disable=eval-used
                 try:
                     g.setdefault(k, eval(expr, g, {}))
                 except Exception as e:
                     self.logger.warning(f"Could not eval recipe for {k}: {expr!r} ({e})")
 
+    #pylint:disable=unused-argument
     def _cleanup_one_template_client(self, client: SummonerClient, label: str):
         """
         Best-effort cleanup for a template client discovered in an imported module.
@@ -971,6 +993,7 @@ class ClientTranslation(SummonerClient):
           - if possible, await cancellations by driving the template's loop
           - close the loop when it is not running
         """
+        # pylint:disable=protected-access
         regs = list(client._registration_tasks or [])
         loop = client.loop
 
@@ -991,6 +1014,7 @@ class ClientTranslation(SummonerClient):
 
         # clear list
         try:
+            # pylint:disable=protected-access
             client._registration_tasks.clear()
         except Exception:
             pass
@@ -1061,6 +1085,7 @@ class ClientTranslation(SummonerClient):
         else:
             raise RuntimeError(f"Could not find definition for '{fn_name}'")
 
+        #pylint:disable=exec-used
         exec(compile(func_body, filename=f"<{self._sandbox_module_name}>", mode="exec"), module_globals)
 
         fn = module_globals.get(fn_name)
@@ -1209,7 +1234,7 @@ class ClientTranslation(SummonerClient):
         except RuntimeError:
             # If the loop isn't running, ignore.
             pass
-    
+
     async def quit(self):
         """
         Quit the translated client:
@@ -1232,4 +1257,3 @@ class ClientTranslation(SummonerClient):
             self.logger.info("KeyboardInterrupt caught-cancelling registration tasks…")
             for task in list(self._registration_tasks or []):
                 task.cancel()
-            return
