@@ -1,3 +1,7 @@
+"""
+Various utilities for strings, json, peer addresses, inspecting code
+"""
+
 from .string_handlers import (
     remove_last_newline,
     ensure_trailing_newline,

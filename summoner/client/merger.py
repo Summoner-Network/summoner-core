@@ -47,6 +47,7 @@ Both classes execute code from DNA via exec() and eval():
 This is intended for trusted DNA (typically produced by your own agents).
 Do not run untrusted DNA.
 """
+#pylint:disable=line-too-long
 
 from importlib import import_module
 from typing import Optional, Any

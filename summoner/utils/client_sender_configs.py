@@ -2,6 +2,7 @@
 In `client.py` config["hyper_parameters"]["sender"]
 has several logic steps. Isolate that out here.
 """
+#pylint:disable=line-too-long
 
 from dataclasses import dataclass
 from typing import List, Optional
@@ -22,7 +23,7 @@ class SenderConfig:
     send_queue_maxsize: int
     event_bridge_maxsize: Optional[int]
     max_consecutive_worker_errors: int
-    
+
     def __post_init__(self):
         if self.max_concurrent_workers <= 0:\
             raise ValueError("The provided max_concurrent_workers must be an integer ≥ 1")
@@ -31,6 +32,7 @@ class SenderConfig:
         if self.max_consecutive_worker_errors <= 0:\
             raise ValueError("The provided max_consecutive_worker_errors must be an integer ≥ 1")
 
+    #pylint:disable=too-many-branches
     def merge_in(self, **kwargs) -> List[str]:
         """
         The logic of _apply_config that is relevant to the sender_cfg.

@@ -1,3 +1,7 @@
+"""
+General json manipulation utilities
+"""
+
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -5,6 +9,7 @@ from typing import Any, Optional
 def fully_recover_json(data):
     """
     Recursively recover original nested structure from JSON strings.
+    A mix of stringified JSON and python lists, dicts and primitives
 
     Args:
         data (any): Data structure possibly containing nested JSON-encoded strings.
@@ -42,9 +47,9 @@ def load_config(config_path: Optional[str], debug: bool = False) -> dict[str, An
     """
     if config_path is None:
         if debug:
-            print(f"[DEBUG] Config file is `None`")
+            print("[DEBUG] Config file is `None`")
         return {}
-    
+
     path = Path(config_path)
 
     if not path.is_file():
@@ -64,7 +69,7 @@ def load_config(config_path: Optional[str], debug: bool = False) -> dict[str, An
     except OSError as e:
         if debug:
             print(f"[DEBUG] OS error reading {config_path}: {e}")
-    except Exception as e:
+    except Exception as e: # pylint:disable=broad-exception-caught
         if debug:
             print(f"[DEBUG] Unexpected error loading {config_path}: {e}")
 
@@ -97,5 +102,5 @@ def is_jsonable(value: Any) -> bool:
     try:
         json.dumps(value)
         return True
-    except Exception:
+    except Exception: # pylint:disable=broad-exception-caught
         return False

@@ -5,6 +5,33 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 import ipaddress
 
+def _format_addr_iterable(addr: Iterable, max_items: int) -> str:
+    try:
+        seq = list(addr)
+    except Exception: # pylint:disable=broad-exception-caught
+        return repr(addr)
+
+    # Common socket cases
+    if len(seq) >= 2 and isinstance(seq[0], (str, bytes)) and isinstance(seq[1], int):
+        host = seq[0].decode() if isinstance(seq[0], (bytes, bytearray, memoryview)) else seq[0]
+        port = seq[1]
+        scopeid = seq[3] if len(seq) >= 4 and isinstance(seq[3], int) else None
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.version == 6:
+                host_fmt = host if scopeid in (None, 0) else f"{host}%{scopeid}"
+                return f"[{host_fmt}]:{port}"
+            return f"{host}:{port}"
+        except ValueError:
+            # Not an IP literal; fall back to host:port
+            return f"{host}:{port}"
+
+    # Generic iterable formatting
+    shown = seq[:max_items]
+    body = ",".join(map(str, shown))
+    suffix = ",..." if len(seq) > max_items else ""
+    return f"[{body}{suffix}]"
+
 def format_addr(addr: Any, max_items: int = 10) -> str:
     """
     Convert a socket peer address (or similar) to a compact, deterministic string.
@@ -52,31 +79,7 @@ def format_addr(addr: Any, max_items: int = 10) -> str:
 
     # generic iterable (list/tuple/set/generator, etc.), but not strings/bytes
     if isinstance(addr, Iterable):
-        try:
-            seq = list(addr)
-        except Exception: # pylint:disable=broad-exception-caught
-            return repr(addr)
-
-        # Common socket cases
-        if len(seq) >= 2 and isinstance(seq[0], (str, bytes)) and isinstance(seq[1], int):
-            host = seq[0].decode() if isinstance(seq[0], (bytes, bytearray, memoryview)) else seq[0]
-            port = seq[1]
-            scopeid = seq[3] if len(seq) >= 4 and isinstance(seq[3], int) else None
-            try:
-                ip = ipaddress.ip_address(host)
-                if ip.version == 6:
-                    host_fmt = host if scopeid in (None, 0) else f"{host}%{scopeid}"
-                    return f"[{host_fmt}]:{port}"
-                return f"{host}:{port}"
-            except ValueError:
-                # Not an IP literal; fall back to host:port
-                return f"{host}:{port}"
-
-        # Generic iterable formatting
-        shown = seq[:max_items]
-        body = ",".join(map(str, shown))
-        suffix = ",..." if len(seq) > max_items else ""
-        return f"[{body}{suffix}]"
+        _format_addr_iterable(addr, max_items)
 
     # fallback
     try:

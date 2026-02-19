@@ -1,13 +1,19 @@
+"""
+SummonerClient
+"""
+#pylint:disable=line-too-long, too-many-lines, wrong-import-position
+#pylint:disable=logging-fstring-interpolation, broad-exception-caught
+
 import os
 import sys
 import json
 from typing import (
     Dict,
-    Optional, 
-    Callable, 
-    Union, 
-    Awaitable, 
-    Any, 
+    Optional,
+    Callable,
+    Union,
+    Awaitable,
+    Any,
     Type,
     cast,
     )
@@ -16,8 +22,6 @@ import signal
 import inspect
 from collections import defaultdict
 import platform
-
-from summoner.utils.client_hyperparameter_configs import TIMEOUT_TYPE
 
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
@@ -32,40 +36,43 @@ from summoner.utils import (
     rebuild_expression_for,
     )
 from summoner.logger import (
-    get_logger, 
-    configure_logger, 
+    get_logger,
+    configure_logger,
     Logger,
     )
 from summoner.protocol.triggers import (
-    Signal, 
-    Event, 
+    Signal,
+    Event,
     Action
     )
 from summoner.protocol.process import (
-    StateTape, 
-    ParsedRoute, 
-    Node, 
-    Sender, 
-    Receiver, 
+    StateTape,
+    ParsedRoute,
+    Node,
+    Sender,
+    Receiver,
     Direction,
     ClientIntent,
     )
 from summoner.protocol.flow import Flow
 from summoner.protocol.validation import (
-    hook_priority_order, 
+    hook_priority_order,
     _check_param_and_return,
 )
 from summoner.protocol.payload import (
-    wrap_with_types, 
+    wrap_with_types,
     recover_with_types,
     RelayedMessage
 )
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
-    pass
 
+#pylint:disable=too-many-instance-attributes
 class SummonerClient:
+    """
+    TODO doc client
+    """
 
     DEFAULT_MAX_BYTES_PER_LINE = 64 * 1024      # 64 KiB
     DEFAULT_READ_TIMEOUT_SECONDS = None         # Wait for messages to arrive
@@ -81,10 +88,10 @@ class SummonerClient:
     core_version = "1.1.1"
 
     def __init__(self, name: Optional[str] = None):
-        
+
         # Give a name to the server
         self.name = name if isinstance(name, str) else "<client:no-name>"
-        
+
         # Create a bare logger (no handlers yet)
         self.logger: Logger = get_logger(self.name)
 
@@ -134,7 +141,7 @@ class SummonerClient:
         # Receiver HyperParameters
         self.max_bytes_per_line : Optional[int] = None
         self.read_timeout_seconds : Optional[float] = None # None is prefered
-        
+
         # Reconnction HyperParameters
         self.retry_delay_seconds : Optional[float] = None
         # self.primary_retry_limit is unbound until _apply_config
@@ -167,11 +174,16 @@ class SummonerClient:
     # ==== VERSION SPECIFIC ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
+        """
+        Given the config which says specific hyperparameters, set the corresponding
+        fields here. Making sure they meet the expected constraints.
+        If some are not provided in config, they may be given default values.
+        """
         self.host                   = config.get("host") # default is None # pyright: ignore[reportAttributeAccessIssue]
         self.port                   = config.get("port") # default is None # pyright: ignore[reportAttributeAccessIssue]
 
         logger_cfg                  = cast(Dict[str,Any],config.get("logger", {}))
-        configure_logger(self.logger, logger_cfg) 
+        configure_logger(self.logger, logger_cfg)
 
         hp_config                   = cast(Dict[str,Any],config.get("hyper_parameters", {}))
 
@@ -185,42 +197,56 @@ class SummonerClient:
         receiver_cfg                = hp_config.get("receiver", {})
         self.max_bytes_per_line     = receiver_cfg.get("max_bytes_per_line", self.DEFAULT_MAX_BYTES_PER_LINE)
         self.read_timeout_seconds   = receiver_cfg.get("read_timeout_seconds", self.DEFAULT_READ_TIMEOUT_SECONDS)
-        
+
         sender_cfg                  = hp_config.get("sender", {})
         self.max_concurrent_workers = sender_cfg.get("concurrency_limit", self.DEFAULT_CONCURRENCY_LIMIT)
         self.batch_drain            = bool(sender_cfg.get("batch_drain", True))
         self.send_queue_maxsize     = sender_cfg.get("queue_maxsize", self.max_concurrent_workers)
         self.event_bridge_maxsize   = sender_cfg.get("event_bridge_maxsize", self.DEFAULT_EVENT_BRIDGE_SIZE)
         self.max_consecutive_worker_errors = sender_cfg.get("max_worker_errors", self.DEFAULT_MAX_CONSECUTIVE_ERRORS)
-        
+
         if (not isinstance(self.max_consecutive_worker_errors, int) or self.max_consecutive_worker_errors < 1):
             raise ValueError("sender.max_worker_errors must be an integer ≥ 1")
 
         if not isinstance(self.max_concurrent_workers, int) or self.max_concurrent_workers <= 0:
             raise ValueError("sender.concurrency_limit must be an integer ≥ 1")
-        
+
         if not isinstance(self.send_queue_maxsize, int) or self.send_queue_maxsize <= 0:
             raise ValueError("sender.queue_maxsize must be an integer ≥ 1")
-        
+
         if self.send_queue_maxsize < self.max_concurrent_workers:
+            #pylint:disable=logging-fstring-interpolation
             self.logger.warning(f"queue_maxsize < concurrency_limit; back-pressure will throttle producers at {self.send_queue_maxsize}")
 
     def initialize(self):
+        """
+        Get the regex patterns for flow ready
+        """
         self._flow.compile_arrow_patterns()
 
     def flow(self) -> Flow:
+        """
+        TODO: doc flow
+        """
         return self._flow
-    
+
     async def travel_to(self, host, port):
+        """
+        Change the host and port.
+        So there is now pending travel.
+        """
         async with self.connection_lock:
             self.host = host
             self.port = port
             self._travel = True
 
     async def quit(self):
+        """
+        Now a pending quit
+        """
         async with self.connection_lock:
             self._quit = True
-    
+
     async def _reset_client_intent(self):
         """Clear any pending quit or travel so we start fresh next time."""
         async with self.connection_lock:
@@ -233,12 +259,12 @@ class SummonerClient:
         Must be used before client.run().
         """
         def decorator(fn: Callable[[], Awaitable]):
-            
+
             # ----[ Safety Checks ]----
-            
+
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@upload_states handler '{fn.__name__}' must be async")
-            
+
             _check_param_and_return(
                 fn,
                 decorator_name="@upload_states",
@@ -252,10 +278,10 @@ class SummonerClient:
                                 ), # the payload-dependent tape
                 logger=self.logger,
             )
-            
+
             # if self.loop.is_running():
             #     raise RuntimeError("@upload_states() must be registered before client.run()")
-            
+
             if self._upload_states is not None:
                 self.logger.warning("@upload_states handler overwritten")
 
@@ -277,21 +303,21 @@ class SummonerClient:
         Must be used before client.run().
         """
         def decorator(fn: Callable[[Any], Awaitable]):
-            
+
             # ----[ Safety Checks ]----
 
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@download_states handler '{fn.__name__}' must be async")
-            
+
             _check_param_and_return(
                 fn,
                 decorator_name="@download_states",
                 allow_param=(type(None), Node, Any, list, dict,  # type: ignore
-                                list[Node], 
-                                dict[str, Node], 
-                                dict[str, list[Node]], 
-                                dict[str, Union[Node, list[Node]]], 
-                                dict[Optional[str], Node], 
+                                list[Node],
+                                dict[str, Node],
+                                dict[str, list[Node]],
+                                dict[str, Union[Node, list[Node]]],
+                                dict[Optional[str], Node],
                                 dict[Optional[str], list[Node]],
                                 dict[Optional[str], Union[Node, list[Node]]],
                                 ),
@@ -301,7 +327,7 @@ class SummonerClient:
 
             # if self.loop.is_running():
             #     raise RuntimeError("@download_states() must be registered before client.run()")
-            
+
             if self._download_states is not None:
                 self.logger.warning("@download_states handler overwritten")
 
@@ -316,7 +342,7 @@ class SummonerClient:
             return fn
 
         return decorator
-    
+
 
     # ==== REGISTRATION HELPER ====
 
@@ -338,17 +364,23 @@ class SummonerClient:
     # ==== HOOK REGISTRATION ====
 
     def hook(
-            self, 
-            direction: Direction, 
+            self,
+            direction: Direction,
             priority: Union[int, tuple[int, ...]] = ()
         ):
-        def decorator(fn: Callable[[Optional[Union[str, dict]]], Optional[Union[str, dict]]]): 
-            
-            # ----[ Safety Checks ]---- 
-            
+        """
+        TODO: doc hook
+        """
+        def decorator(fn: Callable[[Optional[Union[str, dict]]], Optional[Union[str, dict]]]):
+            """
+            TODO: doc decorator
+            """
+
+            # ----[ Safety Checks ]----
+
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@hook handler '{fn.__name__}' must be async")
-            
+
             _check_param_and_return(
                 fn,
                 decorator_name="@hook",
@@ -356,10 +388,10 @@ class SummonerClient:
                 allow_return=(type(None), str, dict, Any), # type: ignore
                 logger=self.logger,
             )
-            
+
             if not isinstance(direction, Direction):
-                raise TypeError(f"Direction for hook must be either Direction.SEND or Direction.RECEIVE")
-            
+                raise TypeError("Direction for hook must be either Direction.SEND or Direction.RECEIVE")
+
             if isinstance(priority, int):
                 tuple_priority = (priority,)
             elif isinstance(priority, tuple) and all(isinstance(p, int) for p in priority):
@@ -375,8 +407,11 @@ class SummonerClient:
                 "source": inspect.getsource(fn),
             })
 
-            # ----[ Registration Code ]----
             async def register():
+                """
+                ----[ Registration Code ]----
+                TODO doc register
+                """
                 async with self.hooks_lock:
                     if direction == Direction.RECEIVE:
                         self.receiving_hooks[tuple_priority] = fn # type: ignore
@@ -394,22 +429,25 @@ class SummonerClient:
     # ==== RECEIVER REGISTRATION ====
 
     def receive(
-            self, 
-            route: str, 
+            self,
+            route: str,
             priority: Union[int, tuple[int, ...]] = ()
         ):
+        """
+        TODO: doc receive
+        """
         route = route.strip()
         def decorator(fn: Callable[[Union[str, dict]], Awaitable[Optional[Event]]]):
-            
+
             # ----[ Safety Checks ]----
-            
+
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@receive handler '{fn.__name__}' must be async")
-            
+
             sig = inspect.signature(fn)
             if len(sig.parameters) != 1:
                 raise TypeError(f"@receive '{fn.__name__}' must accept exactly one argument (payload)")
-            
+
             _check_param_and_return(
                 fn,
                 decorator_name="@receive",
@@ -439,7 +477,7 @@ class SummonerClient:
             # ----[ Registration Code ]----
             async def register():
                 receiver = Receiver(fn=fn, priority=tuple_priority)
-                
+
                 parsed_route = None
                 normalized_route = route
 
@@ -458,7 +496,7 @@ class SummonerClient:
                 async with self.routes_lock:
                     if route in self.receiver_index:
                         self.logger.warning(f"Route '{route}' already exists. Overwriting.")
-                    
+
                     if self._flow.in_use and parsed_route is not None:
                         self.receiver_parsed_routes[normalized_route] = parsed_route
                     self.receiver_index[normalized_route] = receiver
@@ -469,27 +507,30 @@ class SummonerClient:
             return fn
 
         return decorator
-    
+
     # ==== SENDER REGISTRATION ====
 
     def send(
-            self, 
-            route: str, 
-            multi: bool = False, 
+            self,
+            route: str,
+            multi: bool = False,
             on_triggers: Optional[set[Signal]] = None,
             on_actions: Optional[set[Type]] = None,
         ):
+        """
+        TODO: doc send
+        """
         route = route.strip()
         def decorator(fn: Callable[[], Awaitable]):
-            
+
             # ----[ Safety Checks ]----
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@send sender '{fn.__name__}' must be async")
-            
+
             sig = inspect.signature(fn)
             if len(sig.parameters) != 0:
                 raise TypeError(f"@send '{fn.__name__}' must accept no arguments")
-            
+
             if not multi:
                 _check_param_and_return(
                     fn,
@@ -506,7 +547,7 @@ class SummonerClient:
                     allow_return=(Any, list, list[str], list[dict], list[Union[str, dict]]), # type: ignore
                     logger=self.logger,
                 )
-        
+
             if not isinstance(route, str):
                 raise TypeError(f"Argument `route` must be string. Provided: {route}")
 
@@ -524,7 +565,7 @@ class SummonerClient:
                 not all(isinstance(act, type) and issubclass(act, Event) and act in {Action.MOVE, Action.STAY, Action.TEST} for act in on_actions)
             ):
                 raise TypeError(f"Argument `on_actions` must be `None` or a set of Action event classes: {{Action.MOVE, Action.STAY, Action.TEST}}. Provided: {on_actions!r}")
-            
+
             # ----[ DNA capture ]----
             self._dna_senders.append({
                 "fn": fn,
@@ -537,11 +578,11 @@ class SummonerClient:
 
             # ----[ Registration Code ]----
             async def register():
-                
+
                 sender = Sender(fn=fn, multi=multi, actions=on_actions, triggers=on_triggers)
                 actions_exist = isinstance(on_actions, set) and bool(on_actions)
                 triggers_exist = isinstance(on_triggers, set) and bool(on_triggers)
-                
+
                 parsed_route = None
                 normalized_route = route
 
@@ -647,6 +688,7 @@ class SummonerClient:
 
         return "agent"
 
+    #pylint:disable=too-many-locals, too-many-branches, too-many-statements
     def dna(self, include_context: bool = False) -> str:
         """
         Serialize this client's registered behavior into a JSON string ("DNA").
@@ -702,6 +744,7 @@ class SummonerClient:
         - Flow construction and trigger enum creation are not captured unless they are
           referenced and executed within decorated handler sources.
         """
+        #pylint:disable=import-outside-toplevel
         import builtins
 
         # Collect handler functions once so we can reuse them for context analysis.
@@ -885,6 +928,7 @@ class SummonerClient:
                     recipes.setdefault(name, r)
                     if "Path(" in r:
                         path_needed = True
+                    #pylint:disable=consider-using-f-string
                     if "{}(".format(Node.__name__) in r:
                         imports_out.add("from summoner.protocol.process import Node")
                     continue
@@ -958,14 +1002,18 @@ class SummonerClient:
                 continue
 
             return data
-        
 
+
+    # pylint:disable=too-many-locals, too-many-branches, too-many-statements
     async def message_receiver_loop(
-            self, 
-            reader: asyncio.StreamReader, 
+            self,
+            reader: asyncio.StreamReader,
             stop_event: asyncio.Event
         ):
-        
+        """
+        TODO: doc message receiver
+        """
+
         # ----[ Wrapper: Interpret Protocol-Only Errors as None ]----
         async def _safe_call(fn: Callable[[Any], Awaitable], payload: Any) -> Any:
             try:
@@ -976,21 +1024,21 @@ class SummonerClient:
             except Exception as e:
                 self.logger.exception(f"Receiver function {fn.__name__} raised an unexpected error: {e}")
                 raise
-                        
+
         try:
-            
+
             # ----[ Constantly Listen ]----
             while not stop_event.is_set():
-                
+
                 async with self.connection_lock:
                     if self._quit or self._travel:
                         stop_event.set()
                         break
-                
+
                 # ----[ Prepare Receiver Batches ]----
                 async with self.routes_lock:
                     receiver_index: dict[str, Receiver] = self.receiver_index.copy()
-                
+
                 if self._flow.in_use:
                     async with self.routes_lock:
                         receiver_parsed_routes: dict[str, ParsedRoute] = self.receiver_parsed_routes.copy()
@@ -999,21 +1047,21 @@ class SummonerClient:
                 # ----[ Empty: Skip and Prevent Client Overwhelming ]----
                 if not receiver_index:
                     data = await self._read_line_safe(
-                        reader, 
+                        reader,
                         limit=self.max_bytes_per_line,  # type: ignore
                         timeout=0.1,
                         )
                     # if not data:
                     #     raise ServerDisconnected("EOF while dropping messages")
                     continue
-                
+
                 # ----[ Build and Run Receiver Batches ]----
                 try:
-                    
+
                     # ----[ Build: Get Messages ]----
-                    
+
                     data = await self._read_line_safe(
-                        reader, 
+                        reader,
                         limit=self.max_bytes_per_line,  # type: ignore
                         timeout=self.read_timeout_seconds,
                         )
@@ -1034,7 +1082,7 @@ class SummonerClient:
                             if new_payload is None:
                                 payload = None # type: ignore
                                 break
-                            
+
                         except Exception as e:
                             self.logger.error(
                                 f"Receiving hook {receiving_hook.__name__} (priority={priority}) "
@@ -1043,11 +1091,11 @@ class SummonerClient:
                             )
                             new_payload = payload
                         payload = new_payload
-                    
+
                     # if *any* hook returned None, skip the rest of processing
                     if payload is None:
                         continue
-                
+
                     # ----[ Build: Organize Batches by Priority ]----
                     batches: dict[tuple[int, ...], list[Callable[[Any], Awaitable]]] = {}
                     if self._flow.in_use:
@@ -1065,14 +1113,14 @@ class SummonerClient:
                         _ = await reader.readline() # Space
                         await asyncio.sleep(0.1) # Time
                         continue
-                    
+
                     # ----[ Exec: Prepare Passage Receiver → Sender ]----
                     if self._flow.in_use:
                         event_buffer: dict[tuple[int, ...], list[tuple[Optional[str], ParsedRoute, Event]]]  = defaultdict(list)
 
                     # ----[ Exec: Run Batches in Order ]----
                     for priority, batch_fns in sorted(batches.items(), key=lambda kv: kv[0]):
-                        
+
                         # ----[ Before: Run Batch ]----
                         # label = "default priority" if priority == () else f"priority {priority}"
                         # self.logger.info(f"Running batch at {label}, {len(batch_fns)} receivers")
@@ -1083,7 +1131,7 @@ class SummonerClient:
                         # ----[ After: Handle Returns ]----
                         if self._flow.in_use:
                             activations = activation_index[priority] # type: ignore
-                            
+
                             local_tape = tape.refresh() # type: ignore
                             to_extend: dict[str, list[Node]] = defaultdict(list)
                             for act, event in zip(activations, events):
@@ -1100,7 +1148,7 @@ class SummonerClient:
                             # event buffer is bound because this is within if self._flow_in_use
                             # some of the event's in buffer_entries could have been None
                             event_buffer[priority].extend(buffer_entries) # type: ignore
-                                                        
+
                             if self._download_states is not None:
                                 await self._download_states(local_tape.revert())
 
@@ -1113,12 +1161,12 @@ class SummonerClient:
                                 await self.event_bridge.put((priority,) + event_data) # type: ignore
 
                         event_buffer = {}
-                    
+
                 except ServerDisconnected as e:
                     # Intentionally propagate this so reconnection logic can trigger
                     self.logger.info(f"Graceful disconnect from server: {e}")
                     raise
-                
+
                 except (ConnectionResetError, BrokenPipeError) as e:
                     self.logger.warning(f"Socket-level failure (client likely to blame): {e}")
                     break
@@ -1131,7 +1179,7 @@ class SummonerClient:
 
     def _start_send_workers(
             self,
-            writer: asyncio.StreamWriter, 
+            writer: asyncio.StreamWriter,
             stop_event: asyncio.Event
         ):
         if not self.send_workers_started:
@@ -1144,18 +1192,18 @@ class SummonerClient:
 
     async def _send_worker(
             self,
-            writer: asyncio.StreamWriter, 
+            writer: asyncio.StreamWriter,
             stop_event: asyncio.Event
         ):
         consecutive_errors = 0
 
         while True:
-            
+
             item: Optional[tuple[str, Sender]] = await self.send_queue.get() # type: ignore
             if item is None:
                 self.send_queue.task_done() # type: ignore
                 break
-            
+
             route, sender = item
             try:
                 result = await sender.fn()
@@ -1172,10 +1220,10 @@ class SummonerClient:
                 # ----[ Unpack: Handle Multi Sends ]----
                 payloads = result if sender.multi else [result]
                 for payload in payloads:
-                    
+
                     if payload is None:
                         continue
-                    
+
                     # ----[ Unpack: Validation ]----
                     async with self.hooks_lock:
                         sending_hooks = self.sending_hooks.copy()
@@ -1183,11 +1231,11 @@ class SummonerClient:
                     for priority, sending_hook in sorted(sending_hooks.items(), key=lambda kv: hook_priority_order(kv[0])):
                         try:
                             new_payload = await sending_hook(payload) # type: ignore
-                            
+
                             if new_payload is None:
                                 payload = None
                                 break
-                            
+
                         except Exception as e:
                             self.logger.error(
                                 f"[route={route}] Sending hook {sending_hook.__name__} (priority={priority}) "
@@ -1214,7 +1262,7 @@ class SummonerClient:
                     # ----[ Unpack: Post Messages ]----
                     async with self.writer_lock:
                         writer.write(message)
-                
+
                 # No concurrency on batch_drain (initialized in run())
                 if not self.batch_drain:
                     async with self.writer_lock:
@@ -1236,6 +1284,12 @@ class SummonerClient:
                 self.send_queue.task_done() # type: ignore
 
     async def _cleanup_workers(self):
+        """
+        Cancel all worker taks
+        Gather raising any exceptions caused in the worker_tasks
+        Clear them
+        Set back to having not started send workers 
+        """
         for w in self.worker_tasks:
             w.cancel()
         if self.worker_tasks:
@@ -1243,17 +1297,24 @@ class SummonerClient:
         self.worker_tasks.clear()
         self.send_workers_started = False
 
+    #pylint:disable=too-many-nested-blocks, no-else-continue, no-else-break, attribute-defined-outside-init
     async def message_sender_loop(
-            self, 
-            writer: asyncio.StreamWriter, 
+            self,
+            writer: asyncio.StreamWriter,
             stop_event: asyncio.Event
         ):
+        """
+        TODO: doc message_sender
+        """
 
         # ----[ Helper: Matches Routes Between Senders and Receivers to Trigger Send ]----
         def _route_accepts(
-                sender_pr: ParsedRoute, 
+                sender_pr: ParsedRoute,
                 receiver_pr: ParsedRoute
             ) -> bool:
+            """
+            TODO: doc route_accepts
+            """
             source_ok   = all(any(n.accepts(m)  for m in receiver_pr.source)     for n in sender_pr.source)
             label_ok    = all(any(n.accepts(m)  for m in receiver_pr.label)      for n in sender_pr.label)
             target_ok   = all(any(n.accepts(m)  for m in receiver_pr.target)     for n in sender_pr.target)
@@ -1264,28 +1325,28 @@ class SummonerClient:
 
             # ----[ Keep Sending While Actively Listening (No Travel) ]----
             while not stop_event.is_set():
-                
+
                 # ----[ Prepare Sender Batch ]----
-                    
+
                 async with self.routes_lock:
                     sender_index: dict[str, list[Sender]] = self.sender_index.copy()
 
                 # ----[ Fast upload of pending event data ]----
                 if self._flow.in_use:
-                    
+
                     async with self.routes_lock:
                         sender_parsed_routes: dict[str, ParsedRoute] = self.sender_parsed_routes.copy()
-                    
+
                     pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = []
                     try:
                         while True:
                             pending.append(self.event_bridge.get_nowait()) # type: ignore
                     except asyncio.QueueEmpty:
                         pass
-                    
+
                     pending.sort(key=lambda it: hook_priority_order(it[0]))
 
-                # ----[ Build Sender Batch ]---- 
+                # ----[ Build Sender Batch ]----
                 senders: list[tuple[str, Sender]] = []
 
                 # De-dup set: at most one sender per (route, key-from-recv, recv-handler-name) this cycle.
@@ -1293,28 +1354,28 @@ class SummonerClient:
 
                 for route, routed_senders in sender_index.items():
                     for sender in routed_senders:
-                        
+
                         # Non-reactive (no actions/triggers): preserve current behavior
                         if (not self._flow.in_use) or (sender.actions is None and sender.triggers is None):
                             senders.append((route, sender))
-                        
+
                         # Reactive: require matching a pending activation (existential)
-                        elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or 
+                        elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or
                                    (sender.triggers and isinstance(sender.triggers, set))):
-                            
+
                             sender_parsed_route = sender_parsed_routes.get(route) # type: ignore
                             if sender_parsed_route is None:
                                 continue
-                            
+
                             # Iterate pending in queue order; first match "wins" for this (route,key,fn_name)
-                            for (priority, key, parsed_route, event) in pending: # type: ignore
+                            for (_priority, key, parsed_route, event) in pending: # type: ignore
                                 if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
                                     dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
                                     if dedup_key not in emitted:
                                         senders.append((route, sender))
                                         emitted.add(dedup_key)
                                     break  # do not enqueue multiple times for this sender this cycle
-                                    
+
                 # ----[ Empty: Skip and Prevent Client Overwhelming | Almost full: warning ]----
                 if not senders:
                     await asyncio.sleep(0.1) # Time
@@ -1446,14 +1507,14 @@ class SummonerClient:
                 writer.close()
                 await writer.wait_closed()
                 self.logger.info("Disconnected from server.")
-            
+
             finally:
-                
+
                 # Ensure both child tasks are cancelled & awaited even if we were cancelled mid-wait
                 for task in (listen_task, sender_task):
                     if task is not None and not task.done():
                         task.cancel()
-                
+
                 # Clean up worker used in the sender loop
                 await self._cleanup_workers()
 
@@ -1470,10 +1531,13 @@ class SummonerClient:
     # ==== CLIENT LIFE CYCLE ====
 
     def shutdown(self):
+        """
+        Cancel all the tasks for this event loop
+        """
         self.logger.info("Client is shutting down...")
         for task in asyncio.all_tasks(self.loop):
             task.cancel()
-            
+
     def set_termination_signals(self):
         """
         Install SIGINT/SIGTERM handlers onto the loop:
@@ -1482,6 +1546,7 @@ class SummonerClient:
         """
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
+                #pylint:disable=unnecessary-lambda
                 self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def _wait_for_registration(self):
@@ -1501,7 +1566,7 @@ class SummonerClient:
         #     tasks = list(self.active_tasks)
         # if tasks:
         #     await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         async with self.tasks_lock:
             tasks = list(self.active_tasks)
         if tasks:
@@ -1518,7 +1583,7 @@ class SummonerClient:
                 attempts = 0
                 # clean disconnect (/quit or /travel)
                 return True
-            
+
             except (ConnectionRefusedError, ServerDisconnected, OSError) as e:
                 attempts += 1
                 sleep_time = self.retry_delay_seconds or self.DEFAULT_RETRY_DELAY
@@ -1542,68 +1607,74 @@ class SummonerClient:
             if self._travel:
                 return ClientIntent.TRAVEL
             return ClientIntent.ABORT
-        
+
     async def _fallback(self):
+        """
+        use the default host and port
+        """
         async with self.connection_lock:
             self.host = self.default_host
             self.port = self.default_port
 
     async def run_client(self, host: str = '127.0.0.1', port: int = 8888):
+        """
+        TODO: doc run_client
+        """
         primary_stage = True
         while True:
-            
+
             stage = "Primary" if primary_stage else "Default"
             limit = self.primary_retry_limit if primary_stage else self.default_retry_limit
-            
+
             succeeded = await self._retry_loop(host, port, limit, stage)
-            
+
             if succeeded:
-                
+
                 intent = await self._get_client_intent()
-                
+
                 if intent is ClientIntent.QUIT:
-                    break  
-                
+                    break
+
                 elif intent is ClientIntent.TRAVEL:
                     primary_stage = True
                     continue
-                
+
                 else:
                     break
 
             else:
-                
+
                 if primary_stage:
                     primary_stage = False
                     await self._fallback()
                     self.logger.warning(f"Falling back to default server at {self.default_host}:{self.default_port}")
                     continue
-                
+
                 else:
                     self.logger.critical(
                         f"Cannot connect to fallback {self.default_host}:{self.default_port} after "
                         f"{self.default_retry_limit or '∞'} attempts; exiting"
                         )
                     break
-            
+
     def run(
-            self, 
-            host: str = '127.0.0.1', 
-            port: int = 8888, 
+            self,
+            host: str = '127.0.0.1',
+            port: int = 8888,
             config_path: Optional[str] = None,
             config_dict: Optional[dict[str, Any]] = None,
         ):
         try:
-            
+
             if config_dict is None:
                 # Load config parameters
                 client_config = load_config(config_path=config_path, debug=True)
             elif isinstance(config_dict, dict):
                 # Shallow copy to avoid external mutation
-                client_config = dict(config_dict)  
+                client_config = dict(config_dict)
             else:
                 raise TypeError(f"SummonerClient.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
-            
+
             # client_config = load_config(config_path=config_path, debug=True)
             self._apply_config(client_config)
 
@@ -1634,6 +1705,6 @@ class SummonerClient:
                     self.loop.run_until_complete(asyncio.gather(*self.worker_tasks, return_exceptions=True))
             except (asyncio.CancelledError, KeyboardInterrupt):
                 pass
-            
+
             self.loop.close()
             self.logger.info("Client exited cleanly.")

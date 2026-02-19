@@ -2,21 +2,32 @@
 In `client.py` config["hyper_parameters"]["sender"]
 has several logic steps. Isolate that out here.
 """
+#pylint:disable=line-too-long
 
-from dataclasses import dataclass
 from typing import List, Optional, TypeAlias
 
-from summoner.utils.client_reconnect_configs import ReconnectConfig, RETRY_DELAY_SECONDS_TYPE, PORT_TYPE
+# pylint:disable=unused-import
+from summoner.utils.client_reconnect_configs import \
+    ReconnectConfig, RETRY_DELAY_SECONDS_TYPE, PORT_TYPE
 from summoner.utils.client_sender_configs import SenderConfig
 
+#pylint:disable=invalid-name
 TIMEOUT_TYPE: TypeAlias = Optional[float]
 
+#pylint:disable=too-few-public-methods
 class HyperparameterConfig:
+    """
+    Client config hyperparameter section
+    It is mainly broken up into
+    SenderConfig
+    ReconnectConfig
+    The receiver part is smaller so is directly in the remaining 2 fields
+    """
     sender_config: SenderConfig
     reconnect_config: ReconnectConfig
     max_bytes_per_line: int
     read_timeout_seconds: TIMEOUT_TYPE
-    
+
     def __init__(self,
                  sender_config: SenderConfig,
                  reconnect_config: ReconnectConfig,
@@ -27,7 +38,7 @@ class HyperparameterConfig:
         self.reconnect_config = reconnect_config
         self.max_bytes_per_line = max_bytes_per_line
         self.read_timeout_seconds = read_timeout_seconds
-        
+
     def __post_init__(self):
         if self.max_bytes_per_line <= 0:\
             raise ValueError("The provided max_bytes_per_line must be an integer ≥ 1")
@@ -35,6 +46,10 @@ class HyperparameterConfig:
             raise ValueError("The provided read_timeout_seconds must be an float ≥ 0.0 if provided")
 
     def merge_in(self, **kwargs) -> List[str]:
+        """
+        The **kwargs are new values from configuration files
+        and this is setting those values as appropriate
+        """
         all_problems = []
         all_problems.extend(self.sender_config.merge_in(**kwargs["sender"]))
         all_problems.extend(self.reconnect_config.merge_in(**kwargs["reconnection"]))

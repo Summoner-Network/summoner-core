@@ -2,21 +2,28 @@
 In `client.py` config["hyper_parameters"]["reconnection"]
 has several logic steps. Isolate that out here 
 """
+#pylint:disable=line-too-long
 
 from dataclasses import dataclass
 from typing import List, Optional, TypeAlias
 
+#pylint:disable=invalid-name
 RETRY_DELAY_SECONDS_TYPE : TypeAlias = float
+#pylint:disable=invalid-name
 PORT_TYPE : TypeAlias = Optional[int]
 
 @dataclass(slots=True)
 class ReconnectConfig:
+    """
+    In `client.py` config["hyper_parameters"]["reconnection"]
+    has several logic steps. Isolate that out here 
+    """
     retry_delay_seconds: RETRY_DELAY_SECONDS_TYPE
     primary_retry_limit: int
     default_host: Optional[str]
     default_port: PORT_TYPE
     default_retry_limit: int
-    
+
     def __post_init__(self):
         assert self.retry_delay_seconds >= 0.0,\
             "The provided retry_delay_seconds must be a float ≥ 0.0"
@@ -25,7 +32,12 @@ class ReconnectConfig:
         assert self.default_retry_limit >= 0,\
             "The provided default_retry_limit must be an integer ≥ 0"
 
+    #pylint:disable=too-many-branches
     def merge_in(self, **kwargs) -> List[str]:
+        """
+        The **kwargs are new values from configuration files
+        and this is setting those values as appropriate
+        """
         all_problems = []
         if "retry_delay_seconds" in kwargs:
             if not isinstance((z := kwargs["retry_delay_seconds"]), float | int):

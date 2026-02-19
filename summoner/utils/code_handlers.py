@@ -1,3 +1,7 @@
+"""
+Using inspection for Python code
+"""
+
 from typing import Optional, Set, Any
 import inspect
 import ast
@@ -46,7 +50,7 @@ def get_callable_source(fn: Any, override: Optional[str] = None) -> str:
 
     try:
         return inspect.getsource(fn)
-    except Exception:
+    except Exception: # pylint:disable=broad-exception-caught
         src = getattr(fn, "__dna_source__", None)
         if isinstance(src, str) and src.strip():
             return src
@@ -65,6 +69,7 @@ def get_callable_source(fn: Any, override: Optional[str] = None) -> str:
         )
 
 
+# pylint:disable=too-many-branches
 def extract_annotation_identifiers(src: str) -> Set[str]:
     """
     Extract simple identifier names used inside function annotations from source text.
@@ -97,7 +102,7 @@ def extract_annotation_identifiers(src: str) -> Set[str]:
     out: Set[str] = set()
     try:
         tree = ast.parse(textwrap.dedent(src))
-    except Exception:
+    except Exception:# pylint:disable=broad-exception-caught
         return out
 
     fn_node = None
@@ -179,7 +184,7 @@ def rebuild_expression_for(value: object, node_type: Optional[type] = None) -> O
 
     return None
 
-
+# pylint:disable=too-many-return-statements, too-many-branches
 def resolve_import_statement(name: str, value: object, known_modules: Set[str]) -> Optional[str]:
     """
     Try to produce a stable Python import statement that binds `name` to `value`.
@@ -240,7 +245,7 @@ def resolve_import_statement(name: str, value: object, known_modules: Set[str]) 
             known_modules.add(mod)
             if getattr(m, name, None) is value:
                 return f"from {mod} import {name}"
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             pass
 
         obj_name = getattr(value, "__name__", None)
@@ -251,7 +256,7 @@ def resolve_import_statement(name: str, value: object, known_modules: Set[str]) 
                     if name == obj_name:
                         return f"from {mod} import {obj_name}"
                     return f"from {mod} import {obj_name} as {name}"
-            except Exception:
+            except Exception:# pylint:disable=broad-exception-caught
                 pass
 
     # Fallback: search modules we've already seen.
@@ -260,7 +265,7 @@ def resolve_import_statement(name: str, value: object, known_modules: Set[str]) 
             m = import_module(km)
             if getattr(m, name, None) is value:
                 return f"from {km} import {name}"
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             continue
 
     return None
