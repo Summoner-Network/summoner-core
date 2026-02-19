@@ -4,17 +4,18 @@ has several logic steps. Isolate that out here.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TypeAlias
 
-from summoner.utils.client_reconnect_configs import ReconnectConfig
+from summoner.utils.client_reconnect_configs import ReconnectConfig, RETRY_DELAY_SECONDS_TYPE, PORT_TYPE
 from summoner.utils.client_sender_configs import SenderConfig
 
+TIMEOUT_TYPE: TypeAlias = Optional[float]
 
 class HyperparameterConfig:
     sender_config: SenderConfig
     reconnect_config: ReconnectConfig
     max_bytes_per_line: int
-    read_timeout_seconds: Optional[float]
+    read_timeout_seconds: TIMEOUT_TYPE
     
     def __init__(self,
                  sender_config: SenderConfig,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 import re
 from collections.abc import Callable
-from typing import Optional, Any
+from typing import Iterable, Optional, Any
 from .triggers import load_triggers
 from .process import Node, ArrowStyle, ParsedRoute
-from ._deprecation import deprecated
+from ._deprecation import deprecated # type: ignore
 import warnings
 
 # variable names or commands used in flow transitions
@@ -293,5 +293,5 @@ class Flow:
         
         return self._parse_standalone(route)
 
-    def parse_routes(self, routes: list[str]) -> list[ParsedRoute]:
+    def parse_routes(self, routes: Iterable[str]) -> list[ParsedRoute]:
         return [self.parse_route(route=route) for route in routes]

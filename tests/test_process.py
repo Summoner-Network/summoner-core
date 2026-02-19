@@ -1,6 +1,9 @@
 """
 Tests for process.py: Node, ArrowStyle, ParsedRoute, activated_nodes, StateTape, collect_activations
 """
+#pylint:disable=import-outside-toplevel, no-member, invalid-name
+
+from typing import Dict, List, Tuple, cast
 
 import pytest
 from summoner.protocol.process import (
@@ -17,6 +20,11 @@ from summoner.protocol.flow import Flow
 
 
 def test_node_parsing_and_str_repr():
+    """
+    The node kinds can be plain, all, exclude from a specific set,
+    or be one of a specific set.
+    Invalid names raise errors.
+    """
     # Plain token
     n = Node("foo")
     assert n.kind == "plain" and str(n) == "foo"
@@ -25,10 +33,10 @@ def test_node_parsing_and_str_repr():
     assert a.kind == "all" and str(a) == "/all"
     # /not(A,B)
     notn = Node("/not(A,B)")
-    assert notn.kind == "not" and set(notn.values) == {"A", "B"}
+    assert notn.kind == "not" and set(notn.values or ()) == {"A", "B"}
     # /oneof(X,Y)
     ony = Node("/oneof(X,Y)")
-    assert ony.kind == "oneof" and set(ony.values) == {"X", "Y"}
+    assert ony.kind == "oneof" and set(ony.values or ()) == {"X", "Y"}
     with pytest.raises(ValueError):
         Node("invalid(token")
 
@@ -41,11 +49,17 @@ def test_node_parsing_and_str_repr():
     (Node("/oneof(a,b)"), Node("b"), True),
 ])
 def test_node_accepts_matrix(gate, state, expected):
+    """
+    Gates accept or reject the given states
+    """
     # Verify accepts logic across kinds
     assert gate.accepts(state) is expected
 
 
 def test_arrowstyle_valid_and_invalid():
+    """
+    Creation of ArrowStyle being valid or not
+    """
     # Valid style
     style = ArrowStyle("-", ("[", "]"), ",", ">")
     assert style.stem == "-"
@@ -64,6 +78,10 @@ def test_arrowstyle_valid_and_invalid():
 
 
 def test_parsedroute_properties_and_repr():
+    """
+    The properties and regex for matching
+    of ParsedRoute
+    """
     style = ArrowStyle("-", ("[", "]"), ",", ">")
     pr = ParsedRoute((Node("A"),), (), (Node("B"),), style)
     assert not pr.has_label and pr.is_arrow and not pr.is_object
@@ -75,20 +93,29 @@ def test_parsedroute_properties_and_repr():
 
 
 def test_activated_nodes_various_actions():
+    """
+    Check what activated nodes depending on
+    what selected trigger/event passed
+    """
     style = ArrowStyle("-", ("[", "]"), ",", ">")
     pr = ParsedRoute((Node("A"),), (Node("L"),), (Node("B"),), style)
     # Build a dummy trigger/event to pass
-    from summoner.protocol.triggers import Move as MoveEvt, Test as TestEvt, Stay as StayEvt, load_triggers
+    from summoner.protocol.triggers import Move as MoveEvt, Test as TestEvt, \
+        Stay as StayEvt
     Trigger = load_triggers(json_dict={"d": None})
-    move_event = MoveEvt(Trigger.d)
+    move_event = MoveEvt(Trigger.d) # pyright: ignore[reportAttributeAccessIssue]
     assert pr.activated_nodes(move_event) == (Node("L"), Node("B"))
-    test_event = TestEvt(Trigger.d)
+    test_event = TestEvt(Trigger.d) # pyright: ignore[reportAttributeAccessIssue]
     assert pr.activated_nodes(test_event) == (Node("L"),)
-    stay_event = StayEvt(Trigger.d)
+    stay_event = StayEvt(Trigger.d) # pyright: ignore[reportAttributeAccessIssue]
     assert pr.activated_nodes(stay_event) == (Node("A"),)
 
 
 def test_statetape_and_revert_extend_refresh():
+    """
+    revert on StateTape gives correct results
+    and refreshing has the correct effect
+    """
     # SINGLE
     tape1 = StateTape("X")
     assert tape1.revert() == [Node("X")]
@@ -103,25 +130,31 @@ def test_statetape_and_revert_extend_refresh():
     assert tape4.revert() == {"k": [Node("A"), Node("B")]}
     # Test extend and refresh
     tape4.extend({"k": ["C"]})
-    assert tape4.revert()["k"][-1] == Node("C")
+    t4r = cast(Dict[str,List[Node]],tape4.revert())
+    assert t4r["k"][-1] == Node("C")
     fresh = tape4.refresh()
-    assert fresh.revert()["k"] == []
+    fresh_t4r = cast(Dict[str,List[Node]],fresh.revert())
+    assert fresh_t4r["k"] == []
 
 
 def test_collect_activations_simple_case():
+    """
+    What activations do we get for a simple case
+    """
     # Setup flow and parsed route for "A --> B"
     flow = Flow().activate()
     flow.add_arrow_style("-", ("[", "]"), ",", ">")
     flow.compile_arrow_patterns()
     pr = flow.parse_route("A --> B")
     # Fake receiver function
-    async def fn(msg):
+    async def fn(_msg):
         return None
     receiver_index = {str(pr): Receiver(fn=fn, priority=(1,))}
     parsed_routes = {str(pr): pr}
     # Tape with nodes A and C under key 'k'
     tape = StateTape({"k": ["A", "C"]})
-    activations = tape.collect_activations(receiver_index, parsed_routes)
+    activations: Dict[Tuple[int,...],List[TapeActivation]] = \
+        tape.collect_activations(receiver_index, parsed_routes)
     # Only A should match
     assert (1,) in activations
     acts = activations[(1,)]
@@ -132,35 +165,47 @@ def test_collect_activations_simple_case():
     assert act.route == pr
     assert act.fn is fn
 
-
 def test_sender_responds_to_filters():
+    """
+    Sender that responds depending on some filters
+    """
     # Setup a simple Trigger set with two signals
     Trigger = load_triggers(json_dict={"X": None, "Y": None})
-    sigX, sigY = Trigger.X, Trigger.Y
+    sigX, sigY = Trigger.X, Trigger.Y # pyright: ignore[reportAttributeAccessIssue]
     from summoner.protocol.triggers import Move as MoveEvt, Stay as StayEvt, Test as TestEvt
     # Events
-    move_evt = MoveEvt(sigX)
-    stay_evt = StayEvt(sigY)
-    test_evt = TestEvt(sigX)
+    move_x_evt = MoveEvt(sigX)
+    stay_y_evt = StayEvt(sigY)
+    test_x_evt = TestEvt(sigX)
+
+    async def do_nothing():
+        """
+        We are just checking whether or not it responds
+        so what to put here is just a dummy function
+        """
+        return None
 
     # 1) No filters → always responds
-    sender1 = Sender(fn=lambda: None, multi=False, actions=None, triggers=None)
-    assert sender1.responds_to(move_evt)
-    assert sender1.responds_to(stay_evt)
+    sender1 = Sender(fn=do_nothing, multi=False, actions=None, triggers=None)
+    assert sender1.responds_to(move_x_evt)
+    assert sender1.responds_to(stay_y_evt)
+    assert sender1.responds_to(test_x_evt)
 
     # 2) on_actions only
-    sender_actions = Sender(fn=lambda: None, multi=False, actions={Action.MOVE}, triggers=None)
-    assert sender_actions.responds_to(move_evt)
-    assert not sender_actions.responds_to(stay_evt)
+    sender_actions = Sender(fn=do_nothing, multi=False, actions={Action.MOVE}, triggers=None)
+    assert sender_actions.responds_to(move_x_evt)
+    assert not sender_actions.responds_to(stay_y_evt)
+    assert not sender_actions.responds_to(test_x_evt)
 
     # 3) on_triggers only — any event carrying sigX is accepted
-    sender_triggers = Sender(fn=lambda: None, multi=False, actions=None, triggers={sigX})
-    assert sender_triggers.responds_to(move_evt)
-    assert sender_triggers.responds_to(test_evt)      # ← change to True
-    assert not sender_triggers.responds_to(stay_evt)  # different signal Y
+    sender_triggers = Sender(fn=do_nothing, multi=False, actions=None, triggers={sigX})
+    assert sender_triggers.responds_to(move_x_evt)
+    assert sender_triggers.responds_to(test_x_evt)
+    assert not sender_triggers.responds_to(stay_y_evt)  # different signal Y so not responds
 
-    # 4) both filters
-    sender_both = Sender(fn=lambda: None, multi=False, actions={Action.STAY}, triggers={sigY})
-    assert sender_both.responds_to(stay_evt)
+    # 4) both filters, so only the stay and that it is carrying sigY
+    sender_both = Sender(fn=do_nothing, multi=False, actions={Action.STAY}, triggers={sigY})
+    assert sender_both.responds_to(stay_y_evt)
     assert not sender_both.responds_to(StayEvt(sigX))
-    assert not sender_both.responds_to(move_evt)
+    assert not sender_both.responds_to(move_x_evt)
+    assert not sender_both.responds_to(test_x_evt)

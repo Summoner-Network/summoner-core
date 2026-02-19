@@ -4,15 +4,17 @@ has several logic steps. Isolate that out here
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TypeAlias
 
+RETRY_DELAY_SECONDS_TYPE : TypeAlias = float
+PORT_TYPE : TypeAlias = Optional[int]
 
 @dataclass(slots=True)
 class ReconnectConfig:
-    retry_delay_seconds: float
+    retry_delay_seconds: RETRY_DELAY_SECONDS_TYPE
     primary_retry_limit: int
     default_host: Optional[str]
-    default_port: Optional[int]
+    default_port: PORT_TYPE
     default_retry_limit: int
     
     def __post_init__(self):

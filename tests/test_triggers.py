@@ -1,5 +1,10 @@
 """
-Tests for triggers.py: signal-tree parsing, Trigger class, Signal ordering, Event classes, and extract_signal.
+Tests for triggers.py:
+- signal-tree parsing
+- Trigger class
+- Signal ordering
+- Event classes
+- extract_signal
 """
 
 import pytest
@@ -17,6 +22,9 @@ from summoner.protocol.triggers import (
 
 
 def test_parse_signal_tree_simple_hierarchy():
+    """
+    parse_signal_tree on a simple example
+    """
     # Define lines simulating a TRIGGERS file with two levels
     lines = [
         "OK\n",
@@ -30,6 +38,10 @@ def test_parse_signal_tree_simple_hierarchy():
 
 
 def test_parse_signal_tree_invalid_varname():
+    """
+    parse_signal_tree but when the input has an
+    invalid name
+    """
     # Names must be valid Python identifiers
     lines = [
         "123invalid\n"
@@ -40,6 +52,9 @@ def test_parse_signal_tree_invalid_varname():
 
 
 def test_parse_signal_tree_inconsistent_indent():
+    """
+    Indentation syntax error of the parse_signal_tree
+    """
     # Indents must follow previous levels exactly or match existing levels
     lines = [
         "OK\n", 
@@ -52,7 +67,9 @@ def test_parse_signal_tree_inconsistent_indent():
 
 
 def test_parse_signal_tree_duplicate_name():
-    # Duplicate names at same indent level are disallowed
+    """
+    Duplicate names at same indent level are disallowed
+    """
     lines = [
         "OK\n", 
         "    acceptable\n", 
@@ -63,19 +80,25 @@ def test_parse_signal_tree_duplicate_name():
     assert "duplicate signal name" in str(excinfo.value)
 
 
+#pylint:disable=no-member
 def test_load_triggers_with_json_dict():
+    """
+    loading triggers from a json_dict
+    has all the information provided
+    in the constructed Trigger
+    """
     # Provide a nested dict directly to load_triggers
     json_dict = {"root": {"child": None}}
     Trigger = load_triggers(json_dict=json_dict)
     # Ensure attributes and path mappings are correct
     assert hasattr(Trigger, "root") and hasattr(Trigger, "child")
-    assert Trigger.root.path == (0,)
-    assert Trigger.child.path == (0, 0)
-    assert Trigger.name_of(0, 0) == "child"
+    assert Trigger.root.path == (0,) # pyright: ignore[reportAttributeAccessIssue]
+    assert Trigger.child.path == (0, 0) # pyright: ignore[reportAttributeAccessIssue]
+    assert Trigger.name_of(0, 0) == "child" # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_load_triggers_reserved_keyword():
-    # Reserved Python keyword names should raise an error
+    """Reserved Python keyword names should raise an error"""
     json_dict = {"class": None}
     with pytest.raises(ValueError) as excinfo:
         load_triggers(json_dict=json_dict)
@@ -83,16 +106,20 @@ def test_load_triggers_reserved_keyword():
 
 
 def test_signal_comparison_and_properties():
+    """
+    Comparison of signals based on ancestry relation
+    """
     # Simple hierarchy: A -> B (implemented so that ancestor > descendant)
     json_dict = {"A": {"B": None}}
     Trigger = load_triggers(json_dict=json_dict)
-    sigA, sigB = Trigger.A, Trigger.B
+    #pylint:disable=invalid-name
+    sigA, sigB = Trigger.A, Trigger.B # pyright: ignore[reportAttributeAccessIssue]
     # A parent signal compares greater than its child
     assert sigA > sigB
     assert sigB < sigA
     # Equality and hashing based on path
-    assert sigA == Trigger.A
-    assert hash(sigA) == hash(Trigger.A)
+    assert sigA == Trigger.A # pyright: ignore[reportAttributeAccessIssue]
+    assert hash(sigA) == hash(Trigger.A) # pyright: ignore[reportAttributeAccessIssue]
     # repr, name, path
     assert repr(sigA) == "<Signal 'A'>"
     assert sigA.name == "A"
@@ -102,9 +129,13 @@ def test_signal_comparison_and_properties():
 
 
 def test_event_and_action_classes_and_extract_signal():
+    """
+    extract_signal
+    """
     # Instantiate via a single-signal trigger
     Trigger = load_triggers(json_dict={"X": None})
-    sigX = Trigger.X
+    #pylint:disable=invalid-name
+    sigX : Signal = Trigger.X # type: ignore
     move_evt = Move(sigX)
     stay_evt = Stay(sigX)
     test_evt = Test(sigX)

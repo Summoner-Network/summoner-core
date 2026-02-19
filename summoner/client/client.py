@@ -2,18 +2,22 @@ import os
 import sys
 import json
 from typing import (
+    Dict,
     Optional, 
     Callable, 
     Union, 
     Awaitable, 
     Any, 
     Type,
+    cast,
     )
 import asyncio
 import signal
 import inspect
 from collections import defaultdict
 import platform
+
+from summoner.utils.client_hyperparameter_configs import TIMEOUT_TYPE
 
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
@@ -121,18 +125,18 @@ class SummonerClient:
         self._download_states: Optional[Callable[[Any], Awaitable]] = None
 
         # Sender HyperParameters
-        self.event_bridge_maxsize = None
-        self.max_concurrent_workers = None # Limit the sending rate (will use 50 if None is given)
-        self.send_queue_maxsize = None
+        self.event_bridge_maxsize : Optional[int] = None
+        self.max_concurrent_workers : Optional[int] = None # Limit the sending rate (will use 50 if None is given)
+        self.send_queue_maxsize : Optional[int] = None
         self.batch_drain = None
         # self.max_consecutive_worker_errors is unbound until _apply_config
 
         # Receiver HyperParameters
-        self.max_bytes_per_line = None
-        self.read_timeout_seconds = None # None is prefered
+        self.max_bytes_per_line : Optional[int] = None
+        self.read_timeout_seconds : Optional[float] = None # None is prefered
         
         # Reconnction HyperParameters
-        self.retry_delay_seconds = None
+        self.retry_delay_seconds : Optional[float] = None
         # self.primary_retry_limit is unbound until _apply_config
         # self.default_host is unbound until _apply_config
         # self.default_port is unbound until _apply_config
@@ -163,14 +167,13 @@ class SummonerClient:
     # ==== VERSION SPECIFIC ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
+        self.host                   = config.get("host") # default is None # pyright: ignore[reportAttributeAccessIssue]
+        self.port                   = config.get("port") # default is None # pyright: ignore[reportAttributeAccessIssue]
 
-        self.host                   = config.get("host") # default is None
-        self.port                   = config.get("port") # default is None
+        logger_cfg                  = cast(Dict[str,Any],config.get("logger", {}))
+        configure_logger(self.logger, logger_cfg) 
 
-        logger_cfg                  = config.get("logger", {})
-        configure_logger(self.logger, logger_cfg)
-
-        hp_config                   = config.get("hyper_parameters", {})
+        hp_config                   = cast(Dict[str,Any],config.get("hyper_parameters", {}))
 
         reconn_cfg                  = hp_config.get("reconnection", {})
         self.retry_delay_seconds    = reconn_cfg.get("retry_delay_seconds", self.DEFAULT_RETRY_DELAY)
@@ -239,8 +242,8 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@upload_states",
-                allow_param=(type(None), str, dict, Any),   # the payload
-                allow_return=(type(None), str, Any, Node, list, dict,
+                allow_param=(type(None), str, dict, Any),   # the payload # type: ignore
+                allow_return=(type(None), str, Any, Node, list, dict, # type: ignore
                                 list[str],  dict[str, str],  dict[str, list[str]],
                                 list[Node], dict[str, Node], dict[str, list[Node]],
                                 dict[str, Union[str, list[str]]],
@@ -262,7 +265,7 @@ class SummonerClient:
                 "source": inspect.getsource(fn),
             }
 
-            self._upload_states = fn
+            self._upload_states = fn # type: ignore
 
             return fn
 
@@ -283,7 +286,7 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@download_states",
-                allow_param=(type(None), Node, Any, list, dict, 
+                allow_param=(type(None), Node, Any, list, dict,  # type: ignore
                                 list[Node], 
                                 dict[str, Node], 
                                 dict[str, list[Node]], 
@@ -292,7 +295,7 @@ class SummonerClient:
                                 dict[Optional[str], list[Node]],
                                 dict[Optional[str], Union[Node, list[Node]]],
                                 ),
-                allow_return=(type(None), Any),
+                allow_return=(type(None), Any), # type: ignore
                 logger=self.logger,
             )
 
@@ -325,11 +328,11 @@ class SummonerClient:
         """
         if self.loop.is_running():
             def _cb():
-                task = self.loop.create_task(register_coro)
+                task = self.loop.create_task(register_coro) # type: ignore
                 self._registration_tasks.append(task)
             self.loop.call_soon_threadsafe(_cb)
         else:
-            task = self.loop.create_task(register_coro)
+            task = self.loop.create_task(register_coro) # type: ignore
             self._registration_tasks.append(task)
 
     # ==== HOOK REGISTRATION ====
@@ -349,8 +352,8 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@hook",
-                allow_param=(Any, str, dict),
-                allow_return=(type(None), str, dict, Any),
+                allow_param=(Any, str, dict), # type: ignore
+                allow_return=(type(None), str, dict, Any), # type: ignore
                 logger=self.logger,
             )
             
@@ -376,9 +379,9 @@ class SummonerClient:
             async def register():
                 async with self.hooks_lock:
                     if direction == Direction.RECEIVE:
-                        self.receiving_hooks[tuple_priority] = fn
+                        self.receiving_hooks[tuple_priority] = fn # type: ignore
                     elif direction == Direction.SEND:
-                        self.sending_hooks[tuple_priority] = fn
+                        self.sending_hooks[tuple_priority] = fn # type: ignore
 
             # ----[ Safe Registration ]----
             # NOTE: register() is run ASAP and _registration_tasks is used to wait all registrations before run_client()
@@ -410,8 +413,8 @@ class SummonerClient:
             _check_param_and_return(
                 fn,
                 decorator_name="@receive",
-                allow_param=(Any, str, dict),
-                allow_return=(type(None), Event, Any),
+                allow_param=(Any, str, dict), # type: ignore
+                allow_return=(type(None), Event, Any), # type: ignore
                 logger=self.logger,
             )
 
@@ -492,7 +495,7 @@ class SummonerClient:
                     fn,
                     decorator_name="@send",
                     allow_param=(),   # no args allowed
-                    allow_return=(type(None), Any, str, dict),
+                    allow_return=(type(None), Any, str, dict), # type: ignore
                     logger=self.logger,
                 )
             else:
@@ -500,7 +503,7 @@ class SummonerClient:
                     fn,
                     decorator_name="@send[multi=True]",
                     allow_param=(),   # no args allowed
-                    allow_return=(Any, list, list[str], list[dict], list[Union[str, dict]]),
+                    allow_return=(Any, list, list[str], list[dict], list[Union[str, dict]]), # type: ignore
                     logger=self.logger,
                 )
         
@@ -831,7 +834,7 @@ class SummonerClient:
                 continue
 
             # Names referenced by the function body.
-            names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ())
+            names_to_scan = set(getattr(fn, "__code__", None).co_names if hasattr(fn, "__code__") else ()) # type: ignore
 
             # Names referenced only via annotations.
             try:
@@ -840,7 +843,7 @@ class SummonerClient:
                     if isinstance(v, type) or inspect.isfunction(v) or inspect.ismodule(v):
                         nm = getattr(v, "__name__", None)
                         if isinstance(nm, str) and nm:
-                            names_to_scan.add(nm)
+                            names_to_scan.add(nm) # type: ignore
             except Exception:
                 pass
 
@@ -997,7 +1000,7 @@ class SummonerClient:
                 if not receiver_index:
                     data = await self._read_line_safe(
                         reader, 
-                        limit=self.max_bytes_per_line, 
+                        limit=self.max_bytes_per_line,  # type: ignore
                         timeout=0.1,
                         )
                     # if not data:
@@ -1011,7 +1014,7 @@ class SummonerClient:
                     
                     data = await self._read_line_safe(
                         reader, 
-                        limit=self.max_bytes_per_line, 
+                        limit=self.max_bytes_per_line,  # type: ignore
                         timeout=self.read_timeout_seconds,
                         )
                     # data = await reader.readline()
@@ -1026,10 +1029,10 @@ class SummonerClient:
 
                     for priority, receiving_hook in sorted(receiving_hooks.items(), key=lambda kv: hook_priority_order(kv[0])):
                         try:
-                            new_payload = await receiving_hook(payload)
+                            new_payload = await receiving_hook(payload) # type: ignore
 
                             if new_payload is None:
-                                payload = None
+                                payload = None # type: ignore
                                 break
                             
                         except Exception as e:
@@ -1050,7 +1053,7 @@ class SummonerClient:
                     if self._flow.in_use:
                         raw_states = (await self._upload_states(payload)) if self._upload_states is not None else None
                         tape = StateTape(raw_states)
-                        activation_index = tape.collect_activations(receiver_index=receiver_index, parsed_routes=receiver_parsed_routes)
+                        activation_index = tape.collect_activations(receiver_index=receiver_index, parsed_routes=receiver_parsed_routes) # type: ignore
                         batches = {priority: [activation.fn for activation in activations] for priority, activations in activation_index.items()}
                     else:
                         for _, receiver in receiver_index.items():
@@ -1079,27 +1082,35 @@ class SummonerClient:
 
                         # ----[ After: Handle Returns ]----
                         if self._flow.in_use:
-                            activations = activation_index[priority]
+                            activations = activation_index[priority] # type: ignore
                             
-                            local_tape = tape.refresh()
+                            local_tape = tape.refresh() # type: ignore
                             to_extend: dict[str, list[Node]] = defaultdict(list)
                             for act, event in zip(activations, events):
-                                to_extend[act.key].extend(act.route.activated_nodes(event))
+                                if act.key is None:
+                                    # Repeated the code in both branches even though this branch
+                                    # even though in this branch the key is not what it was supposed to be
+                                    # It was stated to have string keys when initializing as the defaultdict above
+                                    to_extend[act.key].extend(act.route.activated_nodes(event)) # type: ignore
+                                else:
+                                    to_extend[act.key].extend(act.route.activated_nodes(event))
                             local_tape.extend(to_extend)
 
                             buffer_entries = [(act.key, act.route, event) for act, event in zip(activations, events)]
-                            event_buffer[priority].extend(buffer_entries)
+                            # event buffer is bound because this is within if self._flow_in_use
+                            # some of the event's in buffer_entries could have been None
+                            event_buffer[priority].extend(buffer_entries) # type: ignore
                                                         
                             if self._download_states is not None:
                                 await self._download_states(local_tape.revert())
 
                     # ----[ Final: Pass Data Over To Senders ]----
                     if self._flow.in_use:
-                        
-                        for priority, event_list in sorted(event_buffer.items(), key=lambda kv: kv[0]):
+                        # event buffer is bound because this is within if self._flow_in_use
+                        for priority, event_list in sorted(event_buffer.items(), key=lambda kv: kv[0]): # type: ignore
                             for event_data in event_list:
                                 # this will block if the bridge is full, slowing down readers
-                                await self.event_bridge.put((priority,) + event_data)
+                                await self.event_bridge.put((priority,) + event_data) # type: ignore
 
                         event_buffer = {}
                     
@@ -1124,6 +1135,8 @@ class SummonerClient:
             stop_event: asyncio.Event
         ):
         if not self.send_workers_started:
+            if self.max_concurrent_workers is None:
+                raise ValueError("_apply_config will make sure that the maximum number of workers is set to an integer ≥ 1")
             for _ in range(self.max_concurrent_workers):
                 worker_task = self.loop.create_task(self._send_worker(writer, stop_event))
                 self.worker_tasks.append(worker_task)
@@ -1138,9 +1151,9 @@ class SummonerClient:
 
         while True:
             
-            item: Optional[tuple[str, Sender]] = await self.send_queue.get()
+            item: Optional[tuple[str, Sender]] = await self.send_queue.get() # type: ignore
             if item is None:
-                self.send_queue.task_done()
+                self.send_queue.task_done() # type: ignore
                 break
             
             route, sender = item
@@ -1169,7 +1182,7 @@ class SummonerClient:
 
                     for priority, sending_hook in sorted(sending_hooks.items(), key=lambda kv: hook_priority_order(kv[0])):
                         try:
-                            new_payload = await sending_hook(payload)
+                            new_payload = await sending_hook(payload) # type: ignore
                             
                             if new_payload is None:
                                 payload = None
@@ -1220,7 +1233,7 @@ class SummonerClient:
                     break
 
             finally:
-                self.send_queue.task_done()
+                self.send_queue.task_done() # type: ignore
 
     async def _cleanup_workers(self):
         for w in self.worker_tasks:
@@ -1266,7 +1279,7 @@ class SummonerClient:
                     pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = []
                     try:
                         while True:
-                            pending.append(self.event_bridge.get_nowait())
+                            pending.append(self.event_bridge.get_nowait()) # type: ignore
                     except asyncio.QueueEmpty:
                         pass
                     
@@ -1289,12 +1302,12 @@ class SummonerClient:
                         elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or 
                                    (sender.triggers and isinstance(sender.triggers, set))):
                             
-                            sender_parsed_route = sender_parsed_routes.get(route)
+                            sender_parsed_route = sender_parsed_routes.get(route) # type: ignore
                             if sender_parsed_route is None:
                                 continue
                             
                             # Iterate pending in queue order; first match "wins" for this (route,key,fn_name)
-                            for (priority, key, parsed_route, event) in pending:
+                            for (priority, key, parsed_route, event) in pending: # type: ignore
                                 if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
                                     dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
                                     if dedup_key not in emitted:
@@ -1307,21 +1320,21 @@ class SummonerClient:
                     await asyncio.sleep(0.1) # Time
                     continue
                 else:
-                    queue_size = self.send_queue.qsize()
+                    queue_size = self.send_queue.qsize() # type: ignore
                     expected_queue_size = queue_size + len(senders)
-                    if expected_queue_size > self.send_queue_maxsize * 0.8:  # 80% full
+                    if expected_queue_size > self.send_queue_maxsize * 0.8:  # type: ignore # 80% full
                         self.logger.warning(f"Queue is about to exceed 80% its capacity; Attempted load size: {expected_queue_size} out of {self.send_queue_maxsize}")
 
                 # ----[ Enqueue Sender Batch | Senders Are Run in Background ]----
                 try:
                     for sender in senders:
-                        await self.send_queue.put(sender)  # Will block if full (i.e., back-pressure)
+                        await self.send_queue.put(sender)  # type: ignore # Will block if full (i.e., back-pressure)
                 except asyncio.CancelledError:
                     self.logger.info("Sender enqueue loop cancelled mid-batch.")
                     raise
 
                 # ----[ Wait for Sender Batch to Finish]----
-                await self.send_queue.join()
+                await self.send_queue.join() # type: ignore
 
                 if self.batch_drain:
                     async with self.writer_lock:
@@ -1340,6 +1353,8 @@ class SummonerClient:
         finally:
             # Best-effort signal to workers; never block on shutdown
             if self.send_queue is not None:
+                if self.max_concurrent_workers is None:
+                    raise ValueError("_apply_config will make sure that the maximum number of workers is set to an integer ≥ 1")
                 # This may result in redundant cancellation if shutdown() is also called,
                 # but guarantees all workers get signaled even in abrupt exits.
                 for _ in range(self.max_concurrent_workers):
@@ -1368,8 +1383,8 @@ class SummonerClient:
 
             # Always clean up old worker tasks and queues before starting new session; guarantees a fresh worker batch and prevents zombie tasks.
             await self._cleanup_workers()
-            self.send_queue = asyncio.Queue(maxsize=self.send_queue_maxsize)
-            self.event_bridge = asyncio.Queue(maxsize = self.event_bridge_maxsize)
+            self.send_queue = asyncio.Queue(maxsize=self.send_queue_maxsize) # type: ignore
+            self.event_bridge = asyncio.Queue(maxsize = self.event_bridge_maxsize) # type: ignore
 
             # reset any previous travel/quit intent so each session starts fresh;
             # travel is only honored if set after this point, quit likewise
@@ -1382,7 +1397,7 @@ class SummonerClient:
                 # Register this session's task so it can be cancelled during shutdown
                 current_task = asyncio.current_task()
                 async with self.tasks_lock:
-                    self.active_tasks.add(current_task)
+                    self.active_tasks.add(current_task) # type: ignore
 
                 # Use lock when accessing dynamic routing information
                 async with self.connection_lock:
@@ -1444,8 +1459,8 @@ class SummonerClient:
 
                 # Deregister this session and its children from active tasks
                 async with self.tasks_lock:
-                    if task is not None:
-                        self.active_tasks.discard(task)
+                    if task is not None: # type: ignore
+                        self.active_tasks.discard(task) # type: ignore
 
             # Check whether we should quit or loop back to travel to the next server (agent migration)
             async with self.connection_lock:
@@ -1506,13 +1521,14 @@ class SummonerClient:
             
             except (ConnectionRefusedError, ServerDisconnected, OSError) as e:
                 attempts += 1
+                sleep_time = self.retry_delay_seconds or self.DEFAULT_RETRY_DELAY
                 self.logger.error(
                     f"[{type(e).__name__}: {e}] "
                     f"({stage}) retry {attempts} of "
                     f"{limit if limit is not None else '∞'}; "
-                    f"sleeping {self.retry_delay_seconds}s",
+                    f"sleeping {sleep_time}s",
                 )
-                await asyncio.sleep(self.retry_delay_seconds)
+                await asyncio.sleep(sleep_time)
 
             # Check retry limit
             if (limit is not None and attempts >= limit):

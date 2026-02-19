@@ -24,7 +24,7 @@ class Node:
     def __init__(self, expr: str) -> None:
         _expr: str = expr.strip()
         self.kind:  str
-        self.values: Optional[tuple[str]]
+        self.values: Optional[tuple[str,...]]
 
         if _ALL_RE.fullmatch(_expr):
             self.kind = 'all'
@@ -70,10 +70,16 @@ class Node:
             if self.kind == 'all':
                 return '/all'
             elif self.kind == 'plain':
+                if self.values is None:
+                    return f"<Invalid Node>"
                 return self.values[0]
             elif self.kind == 'not':
+                if self.values is None:
+                    return f"<Invalid Node>"
                 return f"/not({','.join(self.values)})"
             elif self.kind == 'oneof':
+                if self.values is None:
+                    return f"<Invalid Node>"
                 return f"/oneof({','.join(self.values)})"
             else:
                 return f"<Unknown Node kind: {self.kind!r}>"
@@ -227,6 +233,7 @@ class ParsedRoute:
         self.style  = style
 
         if self.is_arrow:
+            assert self.style is not None, "If an arrow it has a style"
             src = self.style.separator.join(str(n) for n in self.source)
             lab = self.style.separator.join(str(n) for n in self.label)
             tgt = self.style.separator.join(str(n) for n in self.target)
@@ -441,9 +448,17 @@ class StateTape:
     def _add_prefix(self, key: str, with_prefix: bool = True) -> str:
         return f"{self.prefix}:{key}" if with_prefix else key
 
+    def _remove_str_prefix(self, key: str) -> str:
+        p = f"{self.prefix}:"
+        return key[len(p):] if key.startswith(p) else key
+    
+    # The type annotation here is incorrect, key=None gives None
+    # but making this Optional[str] in return
+    # is not the intended behavior and pollutes that possibility
+    # for the caller even when they are not passing key=None
     def _remove_prefix(self, key: Optional[str]) -> str:
         p = f"{self.prefix}:"
-        return key[len(p):] if isinstance(key, str) and key.startswith(p) else key
+        return key[len(p):] if isinstance(key, str) and key.startswith(p) else key # type: ignore
 
     def extend(self, states: Any):
         # Delegate to a local StateTape then merge
@@ -468,7 +483,7 @@ class StateTape:
         if self._type in (TapeType.INDEX_SINGLE, TapeType.INDEX_MANY):
             out_dict: dict[str, list[Node]] = {}
             for pk, seq in self.states.items():
-                key = self._remove_prefix(pk)
+                key = self._remove_str_prefix(pk)
                 out_dict.setdefault(key, [])
                 out_dict[key].extend(seq)
             return out_dict

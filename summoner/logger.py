@@ -1,3 +1,8 @@
+"""
+Handle logging specifics
+to this context
+like details of how things are consistently formatted
+"""
 import sys
 import os
 import json
@@ -7,12 +12,16 @@ import re
 
 from typing import Optional, Any
 from logging.handlers import RotatingFileHandler
-from logging import Logger # This makes Logger importable from logger.py
+
+# This makes Logger importable from logger.py
+#pylint:disable=unused-import
+from logging import Logger
 
 
 # Log formatting style
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-LOG_FORMAT_CONSOLE = "\033[92m%(asctime)s\033[0m - \033[94m%(name)s\033[0m - %(levelname)s - %(message)s"
+LOG_FORMAT_CONSOLE = \
+    "\033[92m%(asctime)s\033[0m - \033[94m%(name)s\033[0m - %(levelname)s - %(message)s"
 
 class SafeStreamHandler(logging.StreamHandler):
     """
@@ -190,7 +199,8 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
         date_format = logger_cfg.get("date_format")
 
         console_handler = SafeStreamHandler(sys.stdout)
-        console_handler.setFormatter(TextFormatter(console_log_format, date_format, logger_cfg.get("log_keys")))
+        console_handler.setFormatter(
+            TextFormatter(console_log_format, date_format, logger_cfg.get("log_keys")))
         logger.addHandler(console_handler)
 
     # file
@@ -208,9 +218,13 @@ def configure_logger(logger: logging.Logger, logger_cfg: dict[str, Any]) -> None
         log_format      = logger_cfg.get("log_format", LOG_FORMAT)
         date_format     = logger_cfg.get("date_format")
 
-        file_handler = RotatingFileHandler(path, maxBytes=max_file_size, backupCount=backup_count)
+        file_handler = RotatingFileHandler(path,
+                                           maxBytes=max_file_size,
+                                           backupCount=backup_count)
         if logger_cfg.get("enable_json_log", False):
-            file_handler.setFormatter(JsonFormatter(log_format, date_format, logger_cfg.get("log_keys")))
+            file_handler.setFormatter(
+                JsonFormatter(log_format, date_format, logger_cfg.get("log_keys")))
         else:
-            file_handler.setFormatter(TextFormatter(log_format, date_format, logger_cfg.get("log_keys")))
+            file_handler.setFormatter(
+                TextFormatter(log_format, date_format, logger_cfg.get("log_keys")))
         logger.addHandler(file_handler)

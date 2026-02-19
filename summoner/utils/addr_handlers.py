@@ -1,3 +1,6 @@
+"""
+Convert a socket peer address (or similar) to a compact, deterministic string.
+"""
 from collections.abc import Iterable, Mapping
 from typing import Any
 import ipaddress
@@ -51,7 +54,7 @@ def format_addr(addr: Any, max_items: int = 10) -> str:
     if isinstance(addr, Iterable):
         try:
             seq = list(addr)
-        except Exception:
+        except Exception: # pylint:disable=broad-exception-caught
             return repr(addr)
 
         # Common socket cases
@@ -64,8 +67,7 @@ def format_addr(addr: Any, max_items: int = 10) -> str:
                 if ip.version == 6:
                     host_fmt = host if scopeid in (None, 0) else f"{host}%{scopeid}"
                     return f"[{host_fmt}]:{port}"
-                else:
-                    return f"{host}:{port}"
+                return f"{host}:{port}"
             except ValueError:
                 # Not an IP literal; fall back to host:port
                 return f"{host}:{port}"
@@ -79,5 +81,5 @@ def format_addr(addr: Any, max_items: int = 10) -> str:
     # fallback
     try:
         return str(addr)
-    except Exception:
+    except Exception: # pylint:disable=broad-exception-caught
         return repr(addr)
