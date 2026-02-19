@@ -593,7 +593,7 @@ class ClientMerger(SummonerClient):
 
         # if your dna() uses a __dna_source__ fallback, keep it
         if hasattr(fn, "__dna_source__"):
-            new_fn.__dna_source__ = fn.__dna_source__
+            new_fn.__dna_source__ = fn.__dna_source__ # type: ignore
 
         return new_fn
 
@@ -811,7 +811,7 @@ class ClientMerger(SummonerClient):
                     dec = self.send(
                         entry["route"],
                         multi=entry.get("multi", False),
-                        on_triggers=on_triggers,
+                        on_triggers=on_triggers, # type: ignore
                         on_actions=on_actions,
                     )
                     self._apply_with_source_patch(dec, fn, entry["source"])
@@ -1019,7 +1019,7 @@ class ClientTranslation(SummonerClient):
 
         for module_name in modules:
             try:
-                module = sys.modules.get(module_name) or import_module(module_name)
+                module = sys.modules.get(module_name) or import_module(module_name) # type: ignore
             except Exception:
                 continue
 
@@ -1150,7 +1150,7 @@ class ClientTranslation(SummonerClient):
             dec = self.send(
                 entry["route"],
                 multi=entry.get("multi", False),
-                on_triggers=on_triggers,
+                on_triggers=on_triggers, # type: ignore
                 on_actions=on_actions,
             )
             self._apply_with_source_patch(dec, fn, entry["source"])
