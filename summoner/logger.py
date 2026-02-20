@@ -10,7 +10,7 @@ import logging
 import datetime
 import re
 
-from typing import Optional, Any
+from typing import Dict, Optional, Any
 from logging.handlers import RotatingFileHandler
 
 # This makes Logger importable from logger.py
@@ -140,7 +140,7 @@ class JsonFormatter(BaseFormatter):
         self.log_keys = log_keys
 
     def format(self, record: logging.LogRecord) -> str:
-        base = {
+        base : Dict[str, str | Dict[Any,Any]] = {
             "timestamp": self.formatTime(record, self._raw_datefmt),
             "name":      record.name,
             "level":     record.levelname,
@@ -150,7 +150,7 @@ class JsonFormatter(BaseFormatter):
                        else {k: record.msg.get(k) for k in self.log_keys if k in record.msg})
         else:
             payload = record.getMessage()
-        base["message"] = payload # type: ignore
+        base["message"] = payload
         return json.dumps(base, default=str)
 
 def get_logger(name: str) -> logging.Logger:

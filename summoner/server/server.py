@@ -1,3 +1,7 @@
+"""
+TODO: doc server
+"""
+# pylint:disable=wrong-import-position, logging-fstring-interpolation
 import asyncio
 import signal
 import os
@@ -14,7 +18,7 @@ if target_path not in sys.path:
 
 # Imports
 from summoner.utils import (
-    remove_last_newline, 
+    remove_last_newline,
     ensure_trailing_newline,
     load_config,
     )
@@ -43,10 +47,13 @@ if platform.system() != "Windows":
 
 class ClientDisconnected(Exception):
     """Raised when the client disconnects cleanly (e.g., closes the socket)."""
-    pass
+
 
 class SummonerServer:
-    
+    """
+    TODO: doc server
+    """
+
     __slots__: tuple[str, ...] = (
         "name",
         "logger",
@@ -72,12 +79,15 @@ class SummonerServer:
 
         self.active_tasks: dict[asyncio.Task, str] = {}
         self.tasks_lock = asyncio.Lock()
-    
+
     async def handle_client(
         self,
-        reader: asyncio.streams.StreamReader, 
+        reader: asyncio.streams.StreamReader,
         writer: asyncio.streams.StreamWriter
         ):
+        """
+        TODO: doc handle_client
+        """
         addr = format_addr(writer.get_extra_info("peername"))
         self.logger.info(f"{addr} connected.")
 
@@ -86,7 +96,7 @@ class SummonerServer:
             self.clients.add(writer)
 
         async with self.tasks_lock:
-            self.active_tasks[task] = addr
+            self.active_tasks[task] = addr # type: ignore
 
         try:
             while True:
@@ -103,54 +113,74 @@ class SummonerServer:
                 # Iterate over the snapshot to avoid concurrency issues without long-held locks
                 for other_writer in clients_snapshot:
                     if other_writer != writer:
-                        payload = json.dumps({"remote_addr": addr, "content": remove_last_newline(message)})
+                        payload = json.dumps(
+                            {
+                                "remote_addr": addr,
+                                "content": remove_last_newline(message)
+                            }
+                        )
                         other_writer.write(ensure_trailing_newline(payload).encode())
                         await other_writer.drain()
-        
+
         except ClientDisconnected:
             self.logger.info(f"{addr} disconnected.")
-        
+
         except (ConnectionResetError, asyncio.IncompleteReadError, asyncio.CancelledError) as e:
             self.logger.warning(f"{addr} error or abrupt disconnect: {e}")
-        
+
         finally:
-            
+
             try:
                 writer.write("Warning: Server disconnected.".encode())
                 await writer.drain()
-            except Exception:
+            except Exception: #pylint:disable=broad-exception-caught
                 pass
-            
+
             async with self.clients_lock:
                 self.clients.discard(writer)
             writer.close()
             await writer.wait_closed()
 
             async with self.tasks_lock:
-                self.active_tasks.pop(task, None)
+                self.active_tasks.pop(task, None) # type: ignore
 
             self.logger.info(f"{addr} connection closed.")
 
+    #pylint:disable=duplicate-code
     def shutdown(self):
+        """
+        Cancel all tasks for this loop
+        """
         self.logger.info("Server is shutting down...")
         for task in asyncio.all_tasks(self.loop):
             task.cancel()
 
     def set_termination_signals(self):
+        """
+        Upon interrupt signal or system/process-based termination
+        do the shutdown method.
+        Requires not Windows to have any effect
+        """
         # SIGINT = interupt signal for Ctrl+C | value = 2
         # SIGTERM = system/process-based termination | value = 15
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
+                #pylint:disable=unnecessary-lambda
                 self.loop.add_signal_handler(sig, lambda: self.shutdown())
 
     async def run_server(self, host: str = '127.0.0.1', port: int = 8888):
+        """
+        TODO: doc run_server
+        """
         server = await asyncio.start_server(self.handle_client, host=host, port=port)
         self.logger.info(f"Python server listening on {host}:{port}.")
         async with server:
             await server.serve_forever()
 
     async def wait_for_tasks_to_finish(self):
-        # Wait for all client handlers to finish
+        """
+        Wait for all client handlers to finish
+        """
         async with self.tasks_lock:
             tasks = list(self.active_tasks)
         if tasks:
@@ -163,15 +193,21 @@ class SummonerServer:
         config_path: Optional[str] = None,
         config_dict: Optional[dict[str, Any]] = None,
     ):
-        
+        """
+        TODO: doc run
+        """
+
         if config_dict is None:
             # Load config parameters
-            server_config = load_config(config_path=config_path, debug=True)
+            server_config = load_config(config_path=config_path,
+                                        debug=True)
         elif isinstance(config_dict, dict):
             # Shallow copy to avoid external mutation
-            server_config = dict(config_dict)  
+            server_config = dict(config_dict)
         else:
-            raise TypeError(f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
+            #pylint:disable=line-too-long
+            raise TypeError(
+                f"SummonerServer.run: config_dict must be a dict or None, got {type(config_dict).__name__}")
 
         if platform.system() != "Windows":
             option = server_config.get("version", None)
@@ -195,6 +231,7 @@ class SummonerServer:
             elif isinstance(option, str) and option.startswith("rust"):
                 available = ", ".join(["rust"] + list(RUST_MODULES.keys())) if RUST_LATEST else \
                             ", ".join(RUST_MODULES.keys())
+                #pylint:disable=line-too-long
                 raise RuntimeError(
                     f"Rust backend '{option}' requested but not available. Installed options: {available or '(none)'}"
                 )
@@ -202,13 +239,14 @@ class SummonerServer:
             if mod is not None:
                 try:
                     requested = option if option is not None else "(unset)"
+                    #pylint:disable=line-too-long
                     print(f"[DEBUG] Config requested version '{requested}' -> resolved to '{mod.__name__}'")
                     mod.start_tokio_server(self.name, _payload(host, port))
                 except KeyboardInterrupt:
                     pass
                 return
 
-        
+
         try:
             logger_cfg = server_config.get("logger", {})
             configure_logger(self.logger, logger_cfg)
@@ -218,7 +256,7 @@ class SummonerServer:
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
-        
+
         finally:
             self.loop.run_until_complete(self.wait_for_tasks_to_finish())
 

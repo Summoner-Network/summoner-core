@@ -2,9 +2,10 @@
 TODO: doc payload
 """
 #pylint:disable=line-too-long
+from enum import Enum, auto
 import json
 from json import JSONDecodeError
-from typing import Any, Tuple, Dict, List, Union, TypedDict
+from typing import Any, Literal, Tuple, Dict, List, Union, TypedDict
 
 from summoner.utils import (
     fully_recover_json,
@@ -67,13 +68,13 @@ def parse_v0_0_1(obj: Any) -> Tuple[Any, Any]:
 
     # Lists → walk each element
     if isinstance(obj, list):
-        payloads: List[Any] = []
-        types:    List[Any] = []
+        payloads_list: List[Any] = []
+        types_list:    List[Any] = []
         for v in obj:
             p, t = parse_v0_0_1(v)
-            payloads.append(p)
-            types.append(t)
-        return payloads, types
+            payloads_list.append(p)
+            types_list.append(t)
+        return payloads_list, types_list
 
     # Dicts → walk each value
     if isinstance(obj, dict):
@@ -212,7 +213,6 @@ class RelayedMessage(TypedDict):
     remote_addr: str
     content: Union[str, dict]
 
-
 def recover_with_types(text: str) -> RelayedMessage:
     """
     Recover and validate a typed payload from a server message.
@@ -230,6 +230,11 @@ def recover_with_types(text: str) -> RelayedMessage:
       - Invalid JSON or non-JSON warning strings: strip trailing newline and return raw string.
       - Missing outer keys ("remote_addr"/"content"): strip newline and return raw string.
       - Missing envelope keys inside content: return the parsed `{"remote_addr":…, "content":…}` as-is.
+      
+    Strictly the return type annotation is not accurate.
+    It may end up in the fallback, but that pollutes that possibility
+    for the caller even when they are known to be passing in the case for text
+    which does not end up in the fallbacks.
 
     Args:
         text: Raw text received from the server (may include newline).
@@ -246,13 +251,13 @@ def recover_with_types(text: str) -> RelayedMessage:
         obj = fully_recover_json(text)
     except (ValueError, JSONDecodeError):
         # If that fails (e.g. pure warning string), strip newline and relay the raw text
-        return remove_last_newline(text)
+        return remove_last_newline(text) # type: ignore
 
     # 2) Ensure we have the outer {"remote_addr":…, "content":…} wrapper
     if not (isinstance(obj, dict) and "remote_addr" in obj and "content" in obj):
         # Malformed protocol message; upstream code can catch this if needed
         # raise ValueError("Unsupported message format from server.")
-        return obj
+        return obj # type: ignore
 
     addr    = obj["remote_addr"]
     content = obj["content"]
@@ -265,7 +270,7 @@ def recover_with_types(text: str) -> RelayedMessage:
         and "_payload" in content
         and "_type" in content
     ):
-        return obj
+        return obj # type: ignore
 
     # 4) We have the versioned envelope—now look up the correct caster
     version = content["_version"]

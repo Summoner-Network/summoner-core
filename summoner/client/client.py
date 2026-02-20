@@ -1,7 +1,7 @@
 """
 SummonerClient
 """
-#pylint:disable=line-too-long, too-many-lines, wrong-import-position
+#pylint:disable=line-too-long, wrong-import-position
 #pylint:disable=logging-fstring-interpolation, broad-exception-caught
 
 import os
@@ -66,7 +66,11 @@ from summoner.protocol.payload import (
     RelayedMessage
 )
 
+#pylint:disable=invalid-name
 ANY_TO_AWAIT = Callable[[Any],Awaitable]
+HOOK_TYPE = Callable[[Union[str, dict]], Union[str, dict]]
+GEN_HOOK_TYPE = Callable[[Optional[Union[str, dict]]], Optional[Union[str, dict]]]
+ASYNC_GEN_HOOK_TYPE = Callable[[Optional[Union[str, dict]]], Awaitable[Optional[Union[str, dict]]]]
 
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
@@ -161,8 +165,8 @@ class SummonerClient:
         self.writer_lock = asyncio.Lock()
 
         # Store validation hooks to be used before sending and after receiving
-        self.sending_hooks: dict[tuple[int,...], Callable[[Union[str, dict]], Union[str, dict]]] = {}
-        self.receiving_hooks: dict[tuple[int,...], Callable[[Union[str, dict]], Union[str, dict]]] = {}
+        self.sending_hooks: dict[tuple[int,...], HOOK_TYPE | GEN_HOOK_TYPE | ASYNC_GEN_HOOK_TYPE] = {}
+        self.receiving_hooks: dict[tuple[int,...], HOOK_TYPE | GEN_HOOK_TYPE | ASYNC_GEN_HOOK_TYPE] = {}
         self.hooks_lock = asyncio.Lock()
 
         # ─── DNA capture for merging ─────────────────────────────────────────
@@ -374,7 +378,7 @@ class SummonerClient:
         """
         TODO: doc hook
         """
-        def decorator(fn: Callable[[Optional[Union[str, dict]]], Optional[Union[str, dict]]]):
+        def decorator(fn: GEN_HOOK_TYPE):
             """
             TODO: doc decorator
             """
@@ -384,6 +388,7 @@ class SummonerClient:
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@hook handler '{fn.__name__}' must be async")
 
+            
             _check_param_and_return(
                 fn,
                 decorator_name="@hook",
@@ -417,9 +422,9 @@ class SummonerClient:
                 """
                 async with self.hooks_lock:
                     if direction == Direction.RECEIVE:
-                        self.receiving_hooks[tuple_priority] = fn # type: ignore
+                        self.receiving_hooks[tuple_priority] = fn
                     elif direction == Direction.SEND:
-                        self.sending_hooks[tuple_priority] = fn # type: ignore
+                        self.sending_hooks[tuple_priority] = fn
 
             # ----[ Safe Registration ]----
             # NOTE: register() is run ASAP and _registration_tasks is used to wait all registrations before run_client()
@@ -1072,7 +1077,8 @@ class SummonerClient:
                     # if not data:
                     #     raise ServerDisconnected("Server closed the connection.")
 
-                    payload: RelayedMessage = recover_with_types(data.decode())
+                    pre_payload: RelayedMessage = recover_with_types(data.decode())
+                    payload: str | dict | RelayedMessage = pre_payload
 
                     # ----[ Build: Validation ]----
                     async with self.hooks_lock:
