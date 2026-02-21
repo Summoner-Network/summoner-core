@@ -5,7 +5,8 @@ TODO: doc process
 from __future__ import annotations
 import re
 from collections import defaultdict
-from typing import Dict, List, Literal, Tuple, Type, Any, Optional, Union, Callable, Awaitable
+from typing import Coroutine, Dict, List, Literal, Tuple, Type, \
+    Any, Optional, Union, Callable, Awaitable
 from enum import Enum, auto
 from dataclasses import dataclass
 from .triggers import Signal, Event, Action, extract_signal
@@ -106,18 +107,19 @@ class Node:
         if not isinstance(state, Node):
             raise TypeError(f"Argument `state` must be Node; {state} provided")
 
+        # pylint:disable=line-too-long
         table : Dict[Tuple[KindType | object, KindType | object], Callable[[Node,Node],bool]] = {
             ('all', 'all'): lambda g, s: True,
             ('all', _WILDCARD): lambda g, s: True,
             (_WILDCARD, 'all'): lambda g, s: True,
-            ('plain', 'plain'): lambda g, s: g.values[0] == s.values[0], # type: ignore
-            ('plain', 'not'):   lambda g, s: g.values[0] not in s.values, # type: ignore
-            ('plain', 'oneof'): lambda g, s: g.values[0] in s.values, # type: ignore
-            ('not', 'plain'):   lambda g, s: s.values[0] not in g.values, # type: ignore
+            ('plain', 'plain'): lambda g, s: g.values[0] == s.values[0],  # pyright: ignore[reportOptionalSubscript]
+            ('plain', 'not'):   lambda g, s: g.values[0] not in s.values,  # pyright: ignore[reportOperatorIssue,reportOptionalSubscript]
+            ('plain', 'oneof'): lambda g, s: g.values[0] in s.values, # pyright: ignore[reportOptionalSubscript,reportOperatorIssue]
+            ('not', 'plain'):   lambda g, s: s.values[0] not in g.values, # pyright: ignore[reportOptionalSubscript,reportOperatorIssue]
             ('not', _WILDCARD): lambda g, s: True,
-            ('oneof', 'plain'): lambda g, s: s.values[0] in g.values, # type: ignore
-            ('oneof', 'not'):   lambda g, s: bool(set(g.values) - set(s.values)), # type: ignore
-            ('oneof', 'oneof'): lambda g, s: bool(set(g.values) & set(s.values)), # type: ignore
+            ('oneof', 'plain'): lambda g, s: s.values[0] in g.values, # pyright: ignore[reportOptionalSubscript,reportOperatorIssue]
+            ('oneof', 'not'):   lambda g, s: bool(set(g.values) - set(s.values)), # pyright: ignore[reportArgumentType]
+            ('oneof', 'oneof'): lambda g, s: bool(set(g.values) & set(s.values)), # pyright: ignore[reportArgumentType]
         }
 
         for (gk, sk), fn in table.items():
@@ -356,7 +358,7 @@ class Sender:
     TODO: doc sender
     """
     __slots__ = ('fn', 'multi', 'actions', 'triggers')
-    fn: Callable[[], Awaitable]
+    fn: Callable[[], Awaitable[Any]]
     multi: bool
     actions: Optional[set[Type]]
     triggers: Optional[set[Signal]]
@@ -383,7 +385,7 @@ class Receiver:
     TODO: doc receiver
     """
     __slots__ = ('fn', 'priority')
-    fn: Callable[[Union[str, dict]], Awaitable[Optional[Event]]]
+    fn: Callable[[Union[str, dict]], Coroutine[Any,Any,Optional[Event]]]
     priority: tuple[int, ...]
 
 class Direction(Enum):
@@ -402,7 +404,7 @@ class TapeActivation:
     key: Optional[str]
     state: Optional[Node]
     route: ParsedRoute
-    fn: Callable[[Any], Awaitable]
+    fn: Callable[[Any], Coroutine[Any,Any,Any]]
 
 # ======= STATE TAPE =======
 
@@ -537,7 +539,9 @@ class StateTape:
         TODO: doc prefix
         """
         p = f"{self.prefix}:"
-        return key[len(p):] if isinstance(key, str) and key.startswith(p) else key # type: ignore
+        if isinstance(key, str) and key.startswith(p):
+            return key[len(p):]
+        return key  # pyright: ignore[reportReturnType]
 
     def extend(self, states: Any):
         """

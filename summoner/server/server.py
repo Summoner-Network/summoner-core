@@ -77,7 +77,7 @@ class SummonerServer:
         self.clients: set[asyncio.streams.StreamWriter] = set()
         self.clients_lock = asyncio.Lock()
 
-        self.active_tasks: dict[asyncio.Task, str] = {}
+        self.active_tasks: dict[Optional[asyncio.Task[Any]], str] = {}
         self.tasks_lock = asyncio.Lock()
 
     async def handle_client(
@@ -96,7 +96,7 @@ class SummonerServer:
             self.clients.add(writer)
 
         async with self.tasks_lock:
-            self.active_tasks[task] = addr # type: ignore
+            self.active_tasks[task] = addr
 
         try:
             while True:
@@ -142,7 +142,7 @@ class SummonerServer:
             await writer.wait_closed()
 
             async with self.tasks_lock:
-                self.active_tasks.pop(task, None) # type: ignore
+                self.active_tasks.pop(task, None)
 
             self.logger.info(f"{addr} connection closed.")
 
@@ -182,7 +182,7 @@ class SummonerServer:
         Wait for all client handlers to finish
         """
         async with self.tasks_lock:
-            tasks = list(self.active_tasks)
+            tasks = list(z for z in self.active_tasks if z is not None)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 

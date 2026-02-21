@@ -2,10 +2,9 @@
 TODO: doc payload
 """
 #pylint:disable=line-too-long
-from enum import Enum, auto
 import json
 from json import JSONDecodeError
-from typing import Any, Literal, Tuple, Dict, List, Union, TypedDict
+from typing import Any, Tuple, Dict, List, Union, TypedDict
 
 from summoner.utils import (
     fully_recover_json,
@@ -251,13 +250,13 @@ def recover_with_types(text: str) -> RelayedMessage:
         obj = fully_recover_json(text)
     except (ValueError, JSONDecodeError):
         # If that fails (e.g. pure warning string), strip newline and relay the raw text
-        return remove_last_newline(text) # type: ignore
+        return remove_last_newline(text) # pyright: ignore[reportReturnType]
 
     # 2) Ensure we have the outer {"remote_addr":…, "content":…} wrapper
     if not (isinstance(obj, dict) and "remote_addr" in obj and "content" in obj):
         # Malformed protocol message; upstream code can catch this if needed
         # raise ValueError("Unsupported message format from server.")
-        return obj # type: ignore
+        return obj # pyright: ignore[reportReturnType]
 
     addr    = obj["remote_addr"]
     content = obj["content"]
@@ -270,7 +269,7 @@ def recover_with_types(text: str) -> RelayedMessage:
         and "_payload" in content
         and "_type" in content
     ):
-        return obj # type: ignore
+        return obj # pyright: ignore[reportReturnType]
 
     # 4) We have the versioned envelope—now look up the correct caster
     version = content["_version"]

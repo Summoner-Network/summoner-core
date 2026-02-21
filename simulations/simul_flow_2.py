@@ -1,5 +1,5 @@
 from summoner.protocol.flow import Flow
-from typing import Type, Optional, List, Dict, Union, Callable, Any, Awaitable
+from typing import Coroutine, Tuple, Optional, Callable, Any
 from summoner.protocol.triggers import (
     Signal,
     Action, 
@@ -123,7 +123,7 @@ pprint.pprint(raw_states)
 
 tape = StateTape(raw_states)
 activation_index: dict[tuple[int, ...], list[TapeActivation]] = tape.collect_activations(receiver_index=receiver_index, parsed_routes=receiver_parsed_routes)
-batches: dict[tuple[int, ...], list[Callable[[Any],Awaitable]]] = {priority: [activation.fn for activation in activations] for priority, activations in activation_index.items()}
+batches: dict[tuple[int, ...], list[Callable[[Any],Coroutine[Any,Any,Any]]]] = {priority: [activation.fn for activation in activations] for priority, activations in activation_index.items()}
 
 print("\n\nactivation_index")
 pprint.pprint(activation_index)
@@ -145,7 +145,7 @@ print("\n\nRun batches → events")
 payload = {"content": "hello"}
 
 async def receiver_test():
-    event_buffer: dict[tuple[int, ...], list[tuple[str, ParsedRoute, Event]]]  = defaultdict(list)
+    event_buffer: dict[tuple[int, ...], list[tuple[Optional[str], ParsedRoute, Optional[Event]]]]  = defaultdict(list)
 
     for priority, batch_fns in sorted(batches.items(), key=lambda kv: kv[0]):
         label = "default priority" if priority == () else f"priority {priority}"
@@ -158,7 +158,7 @@ async def receiver_test():
         activations = activation_index[priority]
 
         local_tape = tape.refresh()
-        to_extend: dict[str, list[Node]] = defaultdict(list)
+        to_extend: dict[Optional[str], list[Node]] = defaultdict(list)
         for act, event in zip(activations, events):
             to_extend[act.key].extend(act.route.activated_nodes(event))
         to_extend = dict(to_extend)
@@ -323,7 +323,7 @@ async def _start_send_workers(num_workers, send_queue):
 
 # --- start workers and test runner ---
 async def sender_test():
-    send_queue: asyncio.Queue[Optional[Sender]] = asyncio.Queue(maxsize=50)
+    send_queue: asyncio.Queue[Optional[Tuple[str,Sender]]] = asyncio.Queue(maxsize=50)
     num_workers = 50
 
     await _start_send_workers(num_workers, send_queue)
@@ -341,5 +341,3 @@ async def sender_test():
 
 # run the simulation
 asyncio.run(sender_test())
-
-

@@ -135,7 +135,7 @@ def test_event_and_action_classes_and_extract_signal():
     # Instantiate via a single-signal trigger
     Trigger = load_triggers(json_dict={"X": None})
     #pylint:disable=invalid-name
-    sigX : Signal = Trigger.X # type: ignore
+    sigX : Signal = Trigger.X # pyright: ignore[reportAttributeAccessIssue]
     move_evt = Move(sigX)
     stay_evt = Stay(sigX)
     test_evt = Test(sigX)

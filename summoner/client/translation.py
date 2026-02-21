@@ -61,11 +61,11 @@ import uuid
 import os
 import sys
 
-from summoner.client.just_merger import _resolve_action, _resolve_trigger
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 if target_path not in sys.path:
     sys.path.insert(0, target_path)
 
+from summoner.client.just_merger import _resolve_action, _resolve_trigger
 from summoner.client.client import SummonerClient
 from summoner.protocol.triggers import Action, load_triggers
 from summoner.protocol.process import Direction
@@ -263,7 +263,7 @@ class ClientTranslation(SummonerClient):
 
         for module_name in modules:
             try:
-                module = sys.modules.get(module_name) or import_module(module_name) # type: ignore
+                module = sys.modules.get(module_name) or import_module(module_name) # pyright: ignore[reportArgumentType]
             except Exception:
                 continue
 
@@ -395,7 +395,7 @@ class ClientTranslation(SummonerClient):
             dec = self.send(
                 entry["route"],
                 multi=entry.get("multi", False),
-                on_triggers=on_triggers, # type: ignore
+                on_triggers=on_triggers,
                 on_actions=on_actions,
             )
             self._apply_with_source_patch(dec, fn, entry["source"])

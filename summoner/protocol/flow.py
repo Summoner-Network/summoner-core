@@ -8,7 +8,7 @@ from typing import Iterable, Optional, Any
 import warnings
 from .triggers import load_triggers
 from .process import Node, ArrowStyle, ParsedRoute
-from ._deprecation import deprecated # type: ignore
+from ._deprecation import deprecated # pyright: ignore[reportAttributeAccessIssue]
 
 # pylint:disable=line-too-long
 

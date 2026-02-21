@@ -71,7 +71,7 @@ from summoner.protocol.triggers import Action, load_triggers
 from summoner.protocol.process import Direction
 
 
-def _resolve_trigger(TriggerCls, name: str):
+def _resolve_trigger(TriggerCls, name: str) -> Any:
     """
     Resolve a trigger name into a trigger instance from TriggerCls.
 
@@ -603,7 +603,7 @@ class ClientMerger(SummonerClient):
 
         # if your dna() uses a __dna_source__ fallback, keep it
         if hasattr(fn, "__dna_source__"):
-            new_fn.__dna_source__ = fn.__dna_source__ # type: ignore
+            new_fn.__dna_source__ = fn.__dna_source__ # pyright: ignore[reportFunctionMemberAccess]
 
         return new_fn
 
@@ -827,7 +827,7 @@ class ClientMerger(SummonerClient):
                     dec = self.send(
                         entry["route"],
                         multi=entry.get("multi", False),
-                        on_triggers=on_triggers, # type: ignore
+                        on_triggers=on_triggers,
                         on_actions=on_actions,
                     )
                     self._apply_with_source_patch(dec, fn, entry["source"])
