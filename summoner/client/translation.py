@@ -48,10 +48,11 @@ This is intended for trusted DNA (typically produced by your own agents).
 Do not run untrusted DNA.
 """
 #pylint:disable=line-too-long, wrong-import-position, duplicate-code
-#pylint:disable=invalid-name, broad-exception-caught,logging-fstring-interpolation
+#pylint:disable=invalid-name, logging-fstring-interpolation
 
 from importlib import import_module
-from typing import Optional, Any
+from typing import Optional
+from typing import Any
 import inspect
 import asyncio
 import types
@@ -177,7 +178,7 @@ class ClientTranslation(SummonerClient):
                 exec(line, g)
                 if self._verbose_context_imports:
                     self.logger.info(f"[translation ctx] import ok: {line}")
-            except Exception as e:
+            except Exception as e:# pylint:disable=broad-exception-caught
                 self.logger.warning(f"[translation ctx] import failed: {line!r} ({type(e).__name__}: {e})")
 
         # Plain globals
@@ -197,7 +198,7 @@ class ClientTranslation(SummonerClient):
                 # pylint:disable=eval-used
                 try:
                     g.setdefault(k, eval(expr, g, {}))
-                except Exception as e:
+                except Exception as e:# pylint:disable=broad-exception-caught
                     self.logger.warning(f"Could not eval recipe for {k}: {expr!r} ({e})")
 
     #pylint:disable=unused-argument
@@ -221,14 +222,14 @@ class ClientTranslation(SummonerClient):
         for t in regs:
             try:
                 t.cancel()
-            except Exception:
+            except Exception:# pylint:disable=broad-exception-caught
                 pass
 
         # drain cancellations if we can drive that loop
         try:
             if regs and loop is not None and (not loop.is_running()) and (not loop.is_closed()):
                 loop.run_until_complete(asyncio.gather(*regs, return_exceptions=True))
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             # best-effort only
             pass
 
@@ -236,14 +237,14 @@ class ClientTranslation(SummonerClient):
         try:
             # pylint:disable=protected-access
             client._registration_tasks.clear()
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             pass
 
         # close the loop (template clients are not meant to run)
         try:
             if loop is not None and (not loop.is_running()) and (not loop.is_closed()):
                 loop.close()
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             pass
 
     def _cleanup_template_clients_from_modules(self):
@@ -264,7 +265,7 @@ class ClientTranslation(SummonerClient):
         for module_name in modules:
             try:
                 module = sys.modules.get(module_name) or import_module(module_name) # pyright: ignore[reportArgumentType]
-            except Exception:
+            except Exception:# pylint:disable=broad-exception-caught
                 continue
 
             g = getattr(module, "__dict__", {})

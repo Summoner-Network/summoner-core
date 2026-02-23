@@ -4,7 +4,8 @@ TODO: doc payload
 #pylint:disable=line-too-long
 import json
 from json import JSONDecodeError
-from typing import Any, Tuple, Dict, List, Union, TypedDict
+from typing import Tuple, Dict, List, Union, TypedDict
+from typing import Any
 
 from summoner.utils import (
     fully_recover_json,
@@ -12,8 +13,10 @@ from summoner.utils import (
     ensure_trailing_newline,
     )
 
-# Current envelope version
-WRAPPER_VERSION = "0.0.1"
+from summoner._version import __version__ as core_version
+
+# Default envelope version
+DEFAULT_VERSION = "0.0.1"
 
 # Registries for versioned parsers and casters
 envelope_parsers: Dict[str, Any] = {}
@@ -41,7 +44,7 @@ NULL_TYPE = "null"
 
 
 #pylint:disable=too-many-return-statements
-def parse_v0_0_1(obj: Any) -> Tuple[Any, Any]:
+def parse_v0_0_1(obj: Any) -> Tuple[Any,Any]:
     """
     Walk `obj` and build a parallel `type_tree`.  Every leaf in `obj`
     becomes a simple type name; every list/dict is recursed.
@@ -90,24 +93,11 @@ def parse_v0_0_1(obj: Any) -> Tuple[Any, Any]:
     s = str(obj)
     return s, STR_TYPE
 
-
-#pylint:disable=too-many-return-statements, too-many-branches
-def cast_v0_0_1(val: Any, expected: Any) -> Any:
+def _cast_primitive(val: Any, expected: Any) -> str | bool | int | float | None | Any:
     """
     Coerce `val` according to `expected`, but never fail on unknown types.
     Instead, pass the value through unchanged if we don't understand.
-
-    Supported expected descriptors:
-      • "string", "boolean", "integer", "number", "null"
-      • a list of descriptors  → cast element-wise up to len(expected)
-      • a dict of descriptors → cast known keys, keep extras unchanged
-      • None or unknown      → identity (return val)
     """
-    # 1) Identity for missing/unknown descriptors
-    if expected is None:
-        return val
-
-    # 2) Primitives
     if expected == STR_TYPE:
         return str(val)
     if expected == BOOL_TYPE:
@@ -126,6 +116,27 @@ def cast_v0_0_1(val: Any, expected: Any) -> Any:
     if expected == NULL_TYPE:
         # always map to Python None
         return None
+    # Unknown expected type → return the raw value
+    raise ValueError(f"Unreachable code in _cast_primitive: expected={expected!r}")
+
+def cast_v0_0_1(val: Any, expected: Any) -> Any:
+    """
+    Coerce `val` according to `expected`, but never fail on unknown types.
+    Instead, pass the value through unchanged if we don't understand.
+
+    Supported expected descriptors:
+      • "string", "boolean", "integer", "number", "null"
+      • a list of descriptors  → cast element-wise up to len(expected)
+      • a dict of descriptors → cast known keys, keep extras unchanged
+      • None or unknown      → identity (return val)
+    """
+    # 1) Identity for missing/unknown descriptors
+    if expected is None:
+        return val
+
+    # 2) Primitives
+    if expected in {STR_TYPE, BOOL_TYPE, INT_TYPE, NUMB_TYPE, NULL_TYPE}:
+        return _cast_primitive(val, expected)
 
     # 3) Lists: cast up to the expected length, keep extras untouched
     if isinstance(expected, list) and isinstance(val, list):
@@ -159,12 +170,12 @@ register_envelope_version("0.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.0", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.1.0", parse_v0_0_1, cast_v0_0_1)
-register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
-
+# register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
+register_envelope_version(core_version, parse_v0_0_1, cast_v0_0_1)
 
 def wrap_with_types(
     payload: Any,
-    version: str = WRAPPER_VERSION
+    version: str = DEFAULT_VERSION
 ) -> str:
     """
     Wrap `payload` in a self-describing JSON envelope with type metadata.
@@ -176,7 +187,7 @@ def wrap_with_types(
 
     Args:
         payload: Any JSON-serializable object (dict, list, primitive).
-        version: Version string for the envelope format (defaults to WRAPPER_VERSION).
+        version: Version string for the envelope format (defaults to DEFAULT_VERSION).
 
     Returns:
         A JSON string representing the typed envelope.
@@ -273,7 +284,7 @@ def recover_with_types(text: str) -> RelayedMessage:
 
     # 4) We have the versioned envelope—now look up the correct caster
     version = content["_version"]
-    caster  = envelope_casters.get(version, envelope_casters[WRAPPER_VERSION])
+    caster  = envelope_casters.get(version, envelope_casters[DEFAULT_VERSION])
     if caster is None:
         # Unknown version: hard error so we don't silently mis-interpret data
         raise ValueError(f"Unsupported wrapper version: {version}")

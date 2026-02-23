@@ -29,13 +29,15 @@ Usage:
 
 import re
 import sys
-from typing import Any, Optional
+from typing import Optional
+from typing import Any
 from pathlib import Path
 import keyword
 
 
 _VARNAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+type TreeType = dict[str, Optional["TreeType"]]
 
 def is_valid_varname(name: str) -> bool:
     """Return True if name matches Python variable naming rules."""
@@ -83,25 +85,27 @@ def update_hierarchy(indent: int, indent_levels: list[int]) -> int:
     return depth
 
 
-def simplify_leaves(tree: dict[str, Any]) -> None:
+def simplify_leaves(tree: TreeType) -> None:
     """
     Recursively convert empty dicts to None to mark leaves.
     (4) No return, operates in-place on 'tree'.
     """
     for key, subtree in list(tree.items()):
+        if subtree is None:
+            continue
         if subtree == {}:
             tree[key] = None
         elif isinstance(subtree, dict):
             simplify_leaves(subtree)
 
 
-def parse_signal_tree_lines(lines: list[str], tabsize: int = 8) -> dict[str, Any]:
+def parse_signal_tree_lines(lines: list[str], tabsize: int = 8) -> TreeType:
     """
     Parse a list of lines (strings) into a nested dict tree.
     This is one entry point, taking raw lines (great for testing).
     """
-    root: dict[str, Any] = {}
-    nodes_by_depth: dict[int, dict[str, Any]] = {0: root}
+    root: TreeType = {}
+    nodes_by_depth: dict[int, TreeType] = {0: root}
     indent_levels: list[int] = [0]
 
     for lineno, raw in enumerate(lines, 1):
@@ -126,13 +130,13 @@ def parse_signal_tree_lines(lines: list[str], tabsize: int = 8) -> dict[str, Any
         for d in list(nodes_by_depth):
             if d > depth:
                 del nodes_by_depth[d]
-        nodes_by_depth[depth + 1] = parent[name]
+        nodes_by_depth[depth + 1] = parent[name] # pyright: ignore[reportArgumentType]
 
     simplify_leaves(root)
     return root
 
 
-def parse_signal_tree(filepath: Path | str, tabsize: int = 8) -> dict[str, Any]:
+def parse_signal_tree(filepath: Path | str, tabsize: int = 8) -> TreeType:
     """
     Read a file and parse it into a nested dict tree.
     This is the second entry point, for file-based input.
@@ -196,20 +200,21 @@ class Signal:
         return f"<Signal {self._name!r}>"
 
 
-def build_triggers(tree: dict[str, Any]):
+def build_triggers(tree: TreeType):
     """
     TODO: doc Trigger
     """
     name_to_path: dict[str, tuple[int, ...]] = {}
     path_to_name: dict[tuple[int, ...], str] = {}
 
-    def recurse(subtree: dict[str, Any], prefix: tuple[int, ...] =()):
+    def recurse(subtree: TreeType, prefix: tuple[int, ...] =()):
         for idx, (name, child) in enumerate(subtree.items()):
             path = prefix + (idx,)
             name_to_path[name] = path
             path_to_name[path] = name
-            if isinstance(child, dict) and child:
-                recurse(child, path)
+            if child is not None:
+                if isinstance(child, dict) and child:
+                    recurse(child, path)
 
     recurse(tree)
 

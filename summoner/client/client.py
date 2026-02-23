@@ -2,11 +2,12 @@
 SummonerClient
 """
 #pylint:disable=line-too-long, wrong-import-position, too-many-lines
-#pylint:disable=logging-fstring-interpolation, broad-exception-caught
+#pylint:disable=logging-fstring-interpolation
 
 import os
 import sys
 import json
+from types import FrameType
 from typing import (
     Awaitable,
     Dict,
@@ -18,9 +19,9 @@ from typing import (
     Tuple,
     Union,
     Coroutine,
-    Any,
     cast,
     )
+from typing import Any
 import asyncio
 import signal
 import inspect
@@ -45,7 +46,12 @@ from summoner.client.dna import (
     DNA_UPLOAD,
     DNAHook,
     DNAReceiver,
-    DNASender
+    DNASender,
+    hook_entry_contribution,
+    receiver_entry_contribution,
+    sender_entry_contribution,
+    upload_entry_contribution,
+    download_entry_contribution,
 )
 from summoner.utils import (
     load_config,
@@ -85,6 +91,8 @@ from summoner.protocol.payload import (
     RelayedMessage
 )
 
+from summoner._version import __version__ as core_version
+
 class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
 
@@ -105,7 +113,7 @@ class SummonerClient:
     DEFAULT_EVENT_BRIDGE_SIZE = 1000
     DEFAULT_MAX_CONSECUTIVE_ERRORS = 3          # Failed attempts to send before disconnecting
 
-    core_version = "1.1.1"
+    core_version = core_version
 
     def __init__(self, name: Optional[str] = None):
 
@@ -506,7 +514,7 @@ class SummonerClient:
                     try:
                         parsed_route = self._flow.parse_route(route)
                         normalized_route = str(parsed_route)
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(
                             f"@receive: could not parse route {route!r} while flow is enabled; "
                             f"registering raw route. Error: {type(e).__name__}: {e}"
@@ -611,7 +619,7 @@ class SummonerClient:
                     try:
                         parsed_route = self._flow.parse_route(route)
                         normalized_route = str(parsed_route)
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(
                             f"@send: could not parse route {route!r} while flow is enabled; "
                             f"registering raw route. Error: {type(e).__name__}: {e}"
@@ -765,11 +773,9 @@ class SummonerClient:
         - Flow construction and trigger enum creation are not captured unless they are
           referenced and executed within decorated handler sources.
         """
-        # TODO: use *_entry_contribution methods to build entries and keep this method cleaner
-        
         #pylint:disable=import-outside-toplevel
         import builtins
-        
+
         # TODO: Only used below, so could have not turned into a list right away
         # Keep only as a generator being iterated over
         handler_fns = list(self._iter_registered_handler_functions())
@@ -777,90 +783,31 @@ class SummonerClient:
         # ----------------------------
         # Handler DNA entries
         # ----------------------------
-        entries: List[Dict[str, Any]] = []
+        entries: List[
+            Dict[str, str] | \
+            Dict[str, str | tuple[int,...]] |\
+            Dict[str, str | bool | List[str]]
+        ] = []
 
         # Upload state hook, if present
         if self._dna_upload_states is not None:
-            fn = self._dna_upload_states["fn"]
-            entries.append({
-                "type": "upload_states",
-                "source": get_callable_source(fn, self._dna_upload_states.get("source")),
-                "module": fn.__module__,
-                "fn_name": fn.__name__,
-            })
+            entries.append(upload_entry_contribution(self._dna_upload_states))
 
         # Download state hook, if present
         if self._dna_download_states is not None:
-            fn = self._dna_download_states["fn"]
-            entries.append({
-                "type": "download_states",
-                "source": get_callable_source(fn, self._dna_download_states.get("source")),
-                "module": fn.__module__,
-                "fn_name": fn.__name__,
-            })
+            entries.append(download_entry_contribution(self._dna_download_states))
 
         # All receivers
         for dna in self._dna_receivers:
-            fn = dna["fn"]
-            raw_route = dna["route"]
-
-            try:
-                if self._flow.in_use:
-                    route_key = str(self._flow.parse_route(raw_route))
-                else:
-                    route_key = raw_route
-            except Exception:
-                route_key = raw_route
-            route_key = "".join(str(route_key).split())
-
-            entries.append({
-                "type": "receive",
-                "route": raw_route, # original route string
-                "route_key": route_key, # stable route representative
-                "priority": dna["priority"],
-                "source": get_callable_source(fn, dna.get("source")),
-                "module": fn.__module__,
-                "fn_name": fn.__name__,
-            })
+            entries.append(receiver_entry_contribution(dna, self._flow if self._flow.in_use else None))
 
         # All senders
         for dna in self._dna_senders:
-            fn = dna["fn"]
-            raw_route = dna["route"]
-
-            try:
-                if self._flow.in_use:
-                    route_key = str(self._flow.parse_route(raw_route))
-                else:
-                    route_key = raw_route
-            except Exception:
-                route_key = raw_route
-            route_key = "".join(str(route_key).split())
-
-            entries.append({
-                "type": "send",
-                "route": raw_route,          # original route string
-                "route_key": route_key,     # stable route representative
-                "multi": dna["multi"],
-                # Serialize triggers/actions by name so they can be re-resolved later.
-                "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
-                "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
-                "source": get_callable_source(fn, dna["source"]),
-                "module": fn.__module__,
-                "fn_name": fn.__name__,
-            })
+            entries.append(sender_entry_contribution(dna, self._flow if self._flow.in_use else None))
 
         # All hooks
         for dna in self._dna_hooks:
-            fn = dna["fn"]
-            entries.append({
-                "type": "hook",
-                "direction": dna["direction"].name,
-                "priority": dna["priority"],
-                "source": get_callable_source(fn, dna.get("source")),
-                "module": fn.__module__,
-                "fn_name": fn.__name__,
-            })
+            entries.append(hook_entry_contribution(dna))
 
         # Fast path: return only handler entries.
         if not include_context:
@@ -889,7 +836,7 @@ class SummonerClient:
         # Identify the runtime type of asyncio.Lock() so we can detect it.
         try:
             lock_type = type(asyncio.Lock())
-        except Exception:
+        except Exception:# pylint:disable=broad-exception-caught
             lock_type = None
 
         # Used by resolve_import_statement to avoid emitting repeated imports.
@@ -915,14 +862,14 @@ class SummonerClient:
                         nm = getattr(v, "__name__", None)
                         if isinstance(nm, str) and nm:
                             names_to_scan.add(nm)
-            except Exception:
+            except Exception:# pylint:disable=broad-exception-caught
                 pass
 
             # Fallback: parse identifiers from annotation syntax in the source.
             try:
                 src = get_callable_source(fn)
                 names_to_scan |= extract_annotation_identifiers(src)
-            except Exception:
+            except Exception:# pylint:disable=broad-exception-caught
                 pass
 
             for name in names_to_scan:
@@ -978,7 +925,7 @@ class SummonerClient:
         if path_needed:
             imports_out.add("from pathlib import Path")
 
-        context_entry : Dict[str, Any] = {
+        context_entry : Dict[str, str | list[str] | dict[str,object] | dict[str,str]] = {
             "type": "__context__",
             "var_name": inferred_var_name,
             "imports": sorted(imports_out),
@@ -1113,7 +1060,7 @@ class SummonerClient:
                                 break
                             payload = new_payload
 
-                        except Exception as e:
+                        except Exception as e:# pylint:disable=broad-exception-caught
                             self.logger.error(
                                 f"Receiving hook {receiving_hook.__name__} (priority={priority}) "
                                 f"failed on payload {payload!r}: {e}",
@@ -1265,7 +1212,7 @@ class SummonerClient:
                                 break
                             payload = new_payload
 
-                        except Exception as e:
+                        except Exception as e:# pylint:disable=broad-exception-caught
                             self.logger.error(
                                 f"[route={route}] Sending hook {sending_hook.__name__} (priority={priority}) "
                                 f"failed on payload {payload!r}: {e}",
@@ -1295,7 +1242,7 @@ class SummonerClient:
                     async with self.writer_lock:
                         await writer.drain()
 
-            except Exception as e:
+            except Exception as e:# pylint:disable=broad-exception-caught
                 consecutive_errors += 1
                 self.logger.error(
                     f"Worker for {sender.fn.__name__} crashed ({consecutive_errors} in a row): {e}",
@@ -1324,7 +1271,7 @@ class SummonerClient:
         self.worker_tasks.clear()
         self.send_workers_started = False
 
-    #pylint:disable=too-many-nested-blocks, no-else-continue, no-else-break, attribute-defined-outside-init
+    #pylint:disable=too-many-nested-blocks, no-else-continue, no-else-break
     async def message_sender_loop(
             self,
             writer: asyncio.StreamWriter,
@@ -1538,7 +1485,7 @@ class SummonerClient:
                     except asyncio.CancelledError:
                         # Normal during shutdown; ignore
                         pass
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.exception(f"Unexpected error during session task: {e}")
 
                 # Cleanly close the connection
@@ -1559,8 +1506,8 @@ class SummonerClient:
                 # Deregister this session and its children from active tasks
                 async with self.tasks_lock:
                     try:
-                        if task is not None: # pyright: ignore[reportPossiblyUnboundVariable]
-                            self.active_tasks.discard(task) # pyright: ignore[reportPossiblyUnboundVariable]
+                        if current_task is not None:
+                            self.active_tasks.discard(current_task)
                     except NameError:
                         pass
 
@@ -1588,8 +1535,22 @@ class SummonerClient:
         """
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
-                #pylint:disable=unnecessary-lambda
-                self.loop.add_signal_handler(sig, lambda: self.shutdown())
+                self.loop.add_signal_handler(sig, self.shutdown)
+        else:
+            def _handler(_sig: int, _frame: Optional[FrameType]):
+                # thread-safe: schedule shutdown on the event loop
+                try:
+                    self.loop.call_soon_threadsafe(self.shutdown)
+                except RuntimeError:
+                    pass
+            signal.signal(signal.SIGINT, _handler)
+            # SIGTERM exists on Windows in Python, but behavior varies by launcher
+            if hasattr(signal, "SIGTERM"):
+                try:
+                    signal.signal(signal.SIGTERM, _handler)
+                except Exception:# pylint:disable=broad-exception-caught
+                    pass
+
 
     async def _wait_for_registration(self):
         """

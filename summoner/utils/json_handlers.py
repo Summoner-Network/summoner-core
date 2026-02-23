@@ -4,7 +4,8 @@ General json manipulation utilities
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
+from typing import Any
 
 def fully_recover_json(data):
     """

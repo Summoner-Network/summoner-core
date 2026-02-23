@@ -4,7 +4,8 @@ Handles many regexes for different ArrowStyle
 from __future__ import annotations
 import re
 from collections.abc import Callable
-from typing import Iterable, Optional, Any
+from typing import Iterable, Optional
+from typing import Any
 import warnings
 from .triggers import load_triggers
 from .process import Node, ArrowStyle, ParsedRoute

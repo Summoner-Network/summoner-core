@@ -1,7 +1,7 @@
 """
 Types used for client and client DNA
 """
-#pylint:disable=wrong-import-position
+#pylint:disable=wrong-import-position, invalid-name
 from typing import (
 Dict,
 List,
@@ -9,9 +9,9 @@ Optional,
 Callable,
 TypedDict,
 Union,
-Any,
 Coroutine,
 )
+from typing import Any
 import os
 import sys
 
@@ -22,10 +22,12 @@ from summoner.protocol.process import Node
 from summoner.protocol.triggers import Event
 from summoner.protocol.payload import RelayedMessage
 
+#pylint:disable=pointless-string-statement
 """
 See the _check_param_and_return_types function in client.py
 inside the decorator internal functions for where these types are actually enforced.
-This tells us what the expected signatures of client hooks, upload functions, and decorated send/receive handlers are.
+This tells us what the expected signatures of client hooks, upload functions,
+and decorated send/receive handlers are.
 That way we can put those expected signatures in one place here. Though
 the actual enforcement of these types is in client.py, not here.
 """
@@ -54,8 +56,12 @@ RECEIVING_HOOKS_TYPE = Callable[
     Coroutine[Any,Any,Optional[Union[str, dict]]]]
 
 SEND_RETURN_SINGLE_TYPE = None | Any | str | Dict[Any,Any]
-SEND_RETURN_MULTI_TYPE = Any | List[Any] | List[str] | List[Dict[Any,Any]] | List[Union[str, Dict[Any,Any]]]
+SEND_RETURN_MULTI_TYPE = Any | List[Any] | List[str] | \
+    List[Dict[Any,Any]] | List[Union[str, Dict[Any,Any]]]
 SEND_DECORATED_TYPE = Callable[[], Coroutine[Any, Any, SEND_RETURN_SINGLE_TYPE]] |\
     Callable[[], Coroutine[Any, Any, SEND_RETURN_MULTI_TYPE]]
 
-RECEIVE_DECORATED_TYPE = Callable[[Any | str | Dict[Any,Any]], Coroutine[Any, Any, Any | Event | None]]
+RECEIVE_DECORATED_TYPE = Callable[
+    [Any | str | Dict[Any,Any]],
+    Coroutine[Any, Any, Any | Event | None]
+]

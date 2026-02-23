@@ -2,7 +2,8 @@
 Using inspection for Python code
 """
 
-from typing import Optional, Set, Any
+from typing import Optional, Set
+from typing import Any
 import inspect
 import ast
 import textwrap

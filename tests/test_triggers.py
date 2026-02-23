@@ -37,6 +37,29 @@ def test_parse_signal_tree_simple_hierarchy():
     assert tree["OK"] == {"acceptable": None, "all_good": None}
 
 
+def test_parse_signal_tree_complex_hierarchy():
+    """
+    parse_signal_tree on a more complicated example
+    """
+    lines = [
+        "OK\n",
+        "    acceptable\n",
+        "    all_good\n",
+        "        great\n",
+        "           perfect\n",
+        "        just_good\n",
+        "BAD\n",
+        "    fixable\n",
+        "    unfixable\n",
+        "       catastrophic\n"
+    ]
+    tree = parse_signal_tree_lines(lines, tabsize=4)
+    # Root key exists and children simplify to None leaves
+    assert "OK" in tree
+    assert tree["OK"] == {"acceptable": None, "all_good": {"great": {"perfect": None}, "just_good": None}}
+    assert "BAD" in tree
+    assert tree["BAD"] == {"fixable": None, "unfixable": {"catastrophic": None}}
+
 def test_parse_signal_tree_invalid_varname():
     """
     parse_signal_tree but when the input has an

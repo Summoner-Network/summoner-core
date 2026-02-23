@@ -14,9 +14,10 @@ DNA is meant to be replayable across environments. Unstable runtime bindings
 (for example '__main__' imports or live objects that cannot be rebuilt) should
 end up in "missing", not embedded implicitly.
 """
-#pylint:disable=wrong-import-position
+#pylint:disable=wrong-import-position, invalid-name, duplicate-code
 
-from typing import Any, Optional, Set, Type, TypedDict
+from typing import List, Optional, Set, Type, TypedDict
+from typing import Any
 
 import os
 import sys
@@ -28,7 +29,8 @@ if target_path not in sys.path:
 from summoner.protocol.flow import Flow
 from summoner.utils.code_handlers import get_callable_source
 from summoner.protocol.triggers import Signal
-from summoner.client.client_types import DOWNLOAD_TYPE, RECEIVE_DECORATED_TYPE, SEND_DECORATED_TYPE, HOOK_TYPE, UPLOAD_TYPE
+from summoner.client.client_types import DOWNLOAD_TYPE, RECEIVE_DECORATED_TYPE, \
+    SEND_DECORATED_TYPE, HOOK_TYPE, UPLOAD_TYPE
 from summoner.protocol.process import Direction
 
 
@@ -41,7 +43,7 @@ class DNAHook(TypedDict):
     priority: tuple[int, ...]
     source: Optional[str]
 
-def hook_entry_contribution(hook_entry: DNAHook) -> dict[str, Any]:
+def hook_entry_contribution(hook_entry: DNAHook) -> dict[str, str | tuple[int,...]]:
     """
     The contribution of this entry to the overall DNA dict.
     """
@@ -64,19 +66,21 @@ class DNAReceiver(TypedDict):
     priority: tuple[int, ...]
     source: Optional[str]
 
-def receiver_entry_contribution(receiver_entry: DNAReceiver, flow_in_use: Optional[Flow]) -> dict[str, Any]:
+def receiver_entry_contribution(
+    receiver_entry: DNAReceiver,
+    flow_in_use: Optional[Flow]) -> dict[str, str | tuple[int,...]]:
     """
     The contribution of this entry to the overall DNA dict.
     """
     fn = receiver_entry["fn"]
     raw_route = receiver_entry["route"]
-    
+
     try:
         if flow_in_use is not None:
             route_key = str(flow_in_use.parse_route(raw_route))
         else:
             route_key = raw_route
-    except Exception:
+    except Exception: #pylint:disable=broad-exception-caught
         route_key = raw_route
     route_key = "".join(str(route_key).split())
 
@@ -98,10 +102,12 @@ class DNASender(TypedDict):
     route: str
     multi: bool
     on_triggers: Optional[Set[Any] | Set[Signal]]
-    on_actions: Optional[set[Any] | Set[Type]]
+    on_actions: Optional[Set[Any] | Set[Type]]
     source: Optional[str]
 
-def sender_entry_contribution(sender_entry: DNASender, flow_in_use: Optional[Flow]) -> dict[str, Any]:
+def sender_entry_contribution(
+    sender_entry: DNASender,
+    flow_in_use: Optional[Flow]) -> dict[str, str | bool | List[str]]:
     """
     The contribution of this entry to the overall DNA dict.
     """
@@ -113,7 +119,7 @@ def sender_entry_contribution(sender_entry: DNASender, flow_in_use: Optional[Flo
             route_key = str(flow_in_use.parse_route(raw_route))
         else:
             route_key = raw_route
-    except Exception:
+    except Exception: #pylint:disable=broad-exception-caught
         route_key = raw_route
     route_key = "".join(str(route_key).split())
 
@@ -136,8 +142,8 @@ class DNA_UPLOAD(TypedDict):
     """
     fn: UPLOAD_TYPE
     source: str
-    
-def upload_entry_contribution(upload_entry: DNA_UPLOAD) -> dict[str, Any]:
+
+def upload_entry_contribution(upload_entry: DNA_UPLOAD) -> dict[str, str]:
     """
     The contribution of this entry to the overall DNA dict.
     """
@@ -155,7 +161,7 @@ class DNA_DOWNLOAD(TypedDict):
     fn: DOWNLOAD_TYPE
     source: str
 
-def download_entry_contribution(download_entry: DNA_DOWNLOAD) -> dict[str, Any]:
+def download_entry_contribution(download_entry: DNA_DOWNLOAD) -> dict[str, str]:
     """
     The contribution of this entry to the overall DNA dict.
     """

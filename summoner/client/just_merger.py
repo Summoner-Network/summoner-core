@@ -48,9 +48,10 @@ This is intended for trusted DNA (typically produced by your own agents).
 Do not run untrusted DNA.
 """
 #pylint:disable=line-too-long, wrong-import-position
-#pylint:disable=invalid-name, broad-exception-caught,logging-fstring-interpolation
+#pylint:disable=invalid-name, logging-fstring-interpolation
 
-from typing import Optional, Any
+from typing import Dict, List, Literal, Optional, TypeGuard, TypedDict
+from typing import Any
 from contextlib import suppress
 from pathlib import Path
 import inspect
@@ -99,12 +100,12 @@ def _resolve_trigger(TriggerCls, name: str) -> Any:
     # Enum-style: TriggerCls["ok"]
     try:
         return TriggerCls[name]
-    except Exception:
+    except Exception:# pylint:disable=broad-exception-caught
         pass
     # Attribute-style: TriggerCls.ok
     try:
         return getattr(TriggerCls, name)
-    except Exception:
+    except Exception:# pylint:disable=broad-exception-caught
         pass
     raise KeyError(f"Unknown trigger '{name}' for {TriggerCls}")
 
@@ -152,6 +153,46 @@ def _resolve_action(ActionCls, name: str):
 
     raise KeyError(f"Unknown action '{name}' for {ActionCls}")
 
+class StructuredReport(TypedDict):
+    """
+    This can be used as a dict[str, Any]
+    but fixed with keys label, succeeded, failed, skipped
+    This is the information returned by _apply_context
+    which says what happened for each
+    line in the ctx["imports"]
+    as far as whether it succeeded, failed with an error, or was skipped due to settings.
+    If ctx was None or there was no key for imports, then this report will have empty lists.
+    """
+    label: str
+    succeeded: list[str]
+    failed: list[tuple[str, str]]  # list of (item, error)
+    skipped: list[str]
+
+class NormalizedClientSource(TypedDict):
+    """
+    See _normalize_source for the meaning of these fields.
+    """
+    kind: Literal["client"]
+    var_name: str
+    client: SummonerClient
+
+class NormalizedDNASource(TypedDict):
+    """
+    See _normalize_source for the meaning of these fields.
+    """
+    kind: Literal["dna"]
+    var_name: str
+    dna_entries: List[Dict[Any,Any]]
+    context: Optional[Dict[Any,Any]]
+    sandbox_name: str
+    globals: Dict[Any,Any]
+    import_report: StructuredReport
+
+def just_client_source(arbitrary_source: NormalizedDNASource | NormalizedClientSource) -> TypeGuard[NormalizedClientSource]:
+    """
+    A type guard to help with the fact that self.sources is a list of two different dict types.
+    """
+    return arbitrary_source["kind"] == "client"
 
 class ClientMerger(SummonerClient):
     """
@@ -216,8 +257,8 @@ class ClientMerger(SummonerClient):
         self._close_subclients = close_subclients
 
         # Normalized sources used later by initiate_* replay methods.
-        self.sources: list[dict[str, Any]] = []
-        self._import_reports: list[dict[str, Any]] = []
+        self.sources: list[NormalizedClientSource | NormalizedDNASource] = []
+        self._import_reports: list[StructuredReport] = []
 
         for idx, entry in enumerate(named_clients):
             src = self._normalize_source(entry, idx)
@@ -231,7 +272,9 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     #pylint:disable=too-many-branches
-    def _normalize_source(self, entry: Any, idx: int) -> dict[str, Any]:
+    def _normalize_source(self,
+                          entry: SummonerClient | List[Dict[Any,Any]] | dict[str, Any],
+                          idx: int) -> NormalizedClientSource | NormalizedDNASource:
         """
         Normalize a user-provided source specification into a canonical dict.
 
@@ -402,7 +445,7 @@ class ClientMerger(SummonerClient):
           4) clear the template's registration list
         """
         for src in self.sources:
-            if src.get("kind") != "client":
+            if not just_client_source(src):
                 continue
 
             client: SummonerClient = src["client"]
@@ -433,13 +476,13 @@ class ClientMerger(SummonerClient):
                     old_loop = None
                     try:
                         # Set context so asyncio.gather/futures bind to the right loop.
-                        with suppress(Exception):
+                        with suppress(Exception):# pylint:disable=broad-exception-caught
                             old_loop = asyncio.get_event_loop_policy().get_event_loop()
                         asyncio.set_event_loop(loop)
 
                         # Await cancellation. This is what prevents warnings.
                         loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(f"[{var_name}] Error draining registration tasks: {e}")
                     finally:
                         # Restore previous loop context (or clear it).
@@ -449,7 +492,7 @@ class ClientMerger(SummonerClient):
                     # 3) close loop after drain
                     try:
                         loop.close()
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(f"[{var_name}] Error closing event loop: {e}")
 
             # 4) clear list
@@ -462,7 +505,7 @@ class ClientMerger(SummonerClient):
     # ----------------------------
 
     # pylint:disable=too-many-branches
-    def _apply_context(self, ctx: Optional[dict], g: dict, *, label: str) -> dict[str, Any]:
+    def _apply_context(self, ctx: Optional[dict[Any,Any]], g: dict[Any,Any], *, label: str) -> StructuredReport:
         """
         Apply a DNA context entry (imports, globals, recipes) into a sandbox globals dict.
 
@@ -481,14 +524,15 @@ class ClientMerger(SummonerClient):
 
         Returns
         -------
-        dict[str, Any]
-            A structured report with keys: label, succeeded, failed, skipped.
+        StructurcedReport
+            can be used as a dict[str, Any] and has keys: label, succeeded, failed, skipped.
+            so how it is used remains the same as a dict, but it is more explicit about the expected structure.
 
         Security note
         -------------
         This executes code from ctx (imports and recipes). Use only with trusted DNA.
         """
-        report = {"label": label, "succeeded": [], "failed": [], "skipped": []}
+        report : StructuredReport = {"label": label, "succeeded": [], "failed": [], "skipped": []}
 
         if not isinstance(ctx, dict):
             return report
@@ -508,7 +552,7 @@ class ClientMerger(SummonerClient):
                 report["succeeded"].append(line)
                 if self._verbose_context_imports:
                     self.logger.info(f"[merge ctx:{label}] import ok: {line}")
-            except Exception as e:
+            except Exception as e:# pylint:disable=broad-exception-caught
                 report["failed"].append((line, f"{type(e).__name__}: {e}"))
                 self.logger.warning(f"[merge ctx:{label}] import failed: {line!r} ({type(e).__name__}: {e})")
 
@@ -528,7 +572,7 @@ class ClientMerger(SummonerClient):
                 try:
                     # pylint:disable=eval-used
                     g.setdefault(k, eval(expr, g, {}))
-                except Exception as e:
+                except Exception as e:# pylint:disable=broad-exception-caught
                     self.logger.warning(f"[merge ctx:{label}] recipe failed {k}={expr!r} ({type(e).__name__}: {e})")
 
         return report
@@ -581,14 +625,14 @@ class ClientMerger(SummonerClient):
         # rebind the client variable name (agent/client/etc)
         try:
             g[original_name] = self
-        except Exception as e:
+        except Exception as e:# pylint:disable=broad-exception-caught
             self.logger.warning(f"Could not bind '{original_name}' to merged client: {e}")
 
         # rebind any shared globals (viz, Trigger, etc.)
         for k, v in self._rebind_globals.items():
             try:
                 g[k] = v
-            except Exception as e:
+            except Exception as e:# pylint:disable=broad-exception-caught
                 self.logger.warning(f"Could not bind global '{k}' in '{fn.__name__}': {e}")
 
         new_fn = types.FunctionType(
@@ -686,7 +730,7 @@ class ClientMerger(SummonerClient):
                 fn_clone = self._clone_handler(fn, var_name)
                 try:
                     self.upload_states()(fn_clone)
-                except Exception as e:
+                except Exception as e:# pylint:disable=broad-exception-caught
                     self.logger.warning(f"[{var_name}] Failed to replay upload_states '{fn.__name__}': {e}")
 
             else:
@@ -712,7 +756,7 @@ class ClientMerger(SummonerClient):
                 fn_clone = self._clone_handler(fn, var_name)
                 try:
                     self.download_states()(fn_clone)
-                except Exception as e:
+                except Exception as e:# pylint:disable=broad-exception-caught
                     self.logger.warning(f"[{var_name}] Failed to replay download_states '{fn.__name__}': {e}")
 
             else:
@@ -736,7 +780,7 @@ class ClientMerger(SummonerClient):
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         self.hook(dna["direction"], priority=dna["priority"])(fn_clone)
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(f"[{var_name}] Failed to replay hook '{dna['fn'].__name__}': {e}")
 
             else:
@@ -761,7 +805,7 @@ class ClientMerger(SummonerClient):
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         self.receive(dna["route"], priority=dna["priority"])(fn_clone)
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(
                             f"[{var_name}] Failed to replay receiver '{dna['fn'].__name__}' on route '{dna['route']}': {e}"
                         )
@@ -804,7 +848,7 @@ class ClientMerger(SummonerClient):
                             on_triggers=dna["on_triggers"],
                             on_actions=dna["on_actions"],
                         )(fn_clone)
-                    except Exception as e:
+                    except Exception as e:# pylint:disable=broad-exception-caught
                         self.logger.warning(
                             f"[{var_name}] Failed to replay sender '{dna['fn'].__name__}' on route '{dna['route']}': {e}"
                         )

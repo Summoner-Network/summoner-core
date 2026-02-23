@@ -5,8 +5,9 @@ TODO: doc process
 from __future__ import annotations
 import re
 from collections import defaultdict
-from typing import Coroutine, Dict, List, Literal, Tuple, Type, \
-    Any, Optional, Union, Callable, Awaitable
+from typing import Coroutine, Dict, List, Literal, Mapping, Tuple, Type, \
+    Optional, TypeGuard, Union, Callable, Awaitable
+from typing import Any
 from enum import Enum, auto
 from dataclasses import dataclass
 from .triggers import Signal, Event, Action, extract_signal
@@ -408,6 +409,22 @@ class TapeActivation:
 
 # ======= STATE TAPE =======
 
+TupleStrNode = Tuple[str | Node, ...] | Tuple[Node, ...] | Tuple[str, ...]
+ListStrNode = List[str | Node] | List[Node] | List[str]
+DictSingleStrNode = Mapping[Optional[str],
+         str | Node
+    ] | Mapping[str,
+         str | Node
+    ]
+DictManyStrNode = Mapping[
+    Optional[str],
+    str | Node | ListStrNode | TupleStrNode] | \
+    Mapping[str,
+    str | Node | ListStrNode | TupleStrNode]
+
+StatesType = DictSingleStrNode | DictManyStrNode | str | Node | \
+    ListStrNode | TupleStrNode | None
+
 class TapeType(Enum):
     """
     TODO: doc tapetype
@@ -417,6 +434,87 @@ class TapeType(Enum):
     INDEX_SINGLE  = auto()
     INDEX_MANY    = auto()
 
+    @staticmethod
+    def single_type_guard(states: Any) -> \
+        TypeGuard[str | Node]:
+        """
+        This input as states would get
+        interpreted as SINGLE type, so it must be a single str or Node
+        """
+        return isinstance(states, (str, Node))
+
+    @staticmethod
+    def many_type_guard(states: Any) -> \
+        TypeGuard[TupleStrNode | ListStrNode]:
+        """
+        This input as states would get
+        interpreted as MANY type, so it must be a list or tuple of str or Node
+        """
+        return isinstance(states, (list, tuple)) and \
+            all(isinstance(s, (str, Node)) for s in states)
+
+    @staticmethod
+    def index_single_guard(states: Any) -> \
+        TypeGuard[DictSingleStrNode]:
+        """
+        This input as states would get
+        interpreted as INDEX_SINGLE type, so it must be a dict from Optional[str] to str or Node
+        """
+        return isinstance(states, dict) and \
+            all(
+                isinstance(k, (str, type(None))) and \
+                isinstance(v, (str, Node)) for k, v in states.items()
+            )
+
+    @staticmethod
+    def index_many_guard(states: Any) -> \
+        TypeGuard[DictManyStrNode]:
+        """
+        This input as states would get
+        interpreted as INDEX_MANY type,
+        so it must be a dict from Optional[str] to list or tuple of str or Node
+        """
+        return isinstance(states, dict) and \
+            all(
+                isinstance(k, (str, type(None)))
+                and (
+                    isinstance(v, (str, Node))
+                    or (
+                        isinstance(v, (list, tuple))
+                        and all(isinstance(x, (str, Node)) for x in v)
+                    )
+                )
+                for k, v in states.items())
+
+    @staticmethod
+    def _assess_type(states: StatesType) -> Optional[TapeType]:
+        """
+        If there is only one state, SINGLE
+        If there is a list or tuple of many states, MANY
+        If there is a dictionary sending each Optional[str] key to a single state, INDEX_SINGLE
+        If there is a dictionary sending each Optional[str] key to possibly many states, INDEX_MANY
+        """
+        # Scalar → SINGLE
+        if TapeType.single_type_guard(states):
+            return TapeType.SINGLE
+
+        # Sequence of scalars → MANY
+        if TapeType.many_type_guard(states):
+            return TapeType.MANY
+
+        # Mapping → either INDEX_SINGLE or INDEX_MANY
+        if isinstance(states, dict):
+            # all values are scalar → INDEX_SINGLE
+            if TapeType.index_single_guard(states):
+                return TapeType.INDEX_SINGLE
+
+            # all values are either scalar or sequence of scalars → INDEX_MANY
+            # but at least one of the values was actually a sequence
+            if TapeType.index_many_guard(states):
+                return TapeType.INDEX_MANY
+
+        return None
+
 class StateTape:
     """
     TODO: doc state tape
@@ -425,9 +523,9 @@ class StateTape:
 
     prefix: str = "tape"
 
-    def __init__(self, states: Any = None, with_prefix: bool = True):
+    def __init__(self, states: StatesType = None, with_prefix: bool = True):
         # Figure out what kind of input we have
-        tp = StateTape._assess_type(states)
+        tp = TapeType._assess_type(states)
 
         # Default: empty index-many
         if tp is None:
@@ -436,18 +534,27 @@ class StateTape:
 
         # Exactly SINGLE
         elif tp is TapeType.SINGLE:
+            assert TapeType.single_type_guard(states)
             node = self._nodeify(states)  # wrap str→Node if needed
+            if not with_prefix:
+                #pylint:disable=line-too-long
+                raise ValueError("StateTape constructor with with_prefix=False only gets called internally and using a dict input.")
             self.states = {self.prefix: [node]}
             self._type  = tp
 
         # Exactly MANY
         elif tp is TapeType.MANY:
+            assert TapeType.many_type_guard(states)
             nodes = [self._nodeify(s) for s in states]
+            if not with_prefix:
+                #pylint:disable=line-too-long
+                raise ValueError("StateTape constructor with with_prefix=False only gets called internally and using a dict input.")
             self.states = {self.prefix: nodes}
             self._type  = tp
 
         # Exactly INDEX_SINGLE
         elif tp is TapeType.INDEX_SINGLE:
+            assert TapeType.index_single_guard(states)
             self.states = {
                 self._add_prefix(k, with_prefix): [self._nodeify(v)]
                 for k, v in states.items()
@@ -456,8 +563,15 @@ class StateTape:
 
         # Exactly INDEX_MANY
         elif tp is TapeType.INDEX_MANY:
+            assert TapeType.index_many_guard(states)
+            def v_to_node_list(v: Union[str, Node, ListStrNode, TupleStrNode]) -> List[Node]:
+                if isinstance(v, (str, Node)):
+                    return [self._nodeify(v)]
+                if isinstance(v, (list, tuple)):
+                    return [self._nodeify(s) for s in v]
+                raise TypeError(f"Invalid value type in INDEX_MANY: {v!r}")
             self.states = {
-                self._add_prefix(k, with_prefix): [self._nodeify(s) for s in v]
+                self._add_prefix(k, with_prefix): v_to_node_list(v)
                 for k, v in states.items()
             }
             self._type = tp
@@ -473,54 +587,14 @@ class StateTape:
         self._type = value
         return self
 
-    @staticmethod
-    def _assess_type(states: Any) -> Optional[TapeType]:
-        """
-        If there is only one state, SINGLE
-        If there is a list or tuple of many states, MANY
-        If there is a dictionary sending each Optional[str] key to a single state, INDEX_SINGLE
-        If there is a dictionary sending each Optional[str] key to possibly many states, INDEX_MANY
-        """
-        # Scalar → SINGLE
-        if isinstance(states, (str, Node)):
-            return TapeType.SINGLE
-
-        # Sequence of scalars → MANY
-        if isinstance(states, (list, tuple)):
-            if all(isinstance(s, (str, Node)) for s in states):
-                return TapeType.MANY
-
-        # Mapping → either INDEX_SINGLE or INDEX_MANY
-        if isinstance(states, dict):
-            # all values are scalar → INDEX_SINGLE
-            if all(
-                isinstance(k, (str, type(None)))
-                and isinstance(v, (str, Node))
-                for k, v in states.items()
-            ):
-                return TapeType.INDEX_SINGLE
-
-            # all values are either scalar or sequence of scalars → INDEX_MANY
-            # but at least one of the values was actually a sequence
-            if all(
-                isinstance(k, (str, type(None)))
-                and (
-                    isinstance(v, (str, Node))
-                    or (
-                        isinstance(v, (list, tuple))
-                        and all(isinstance(x, (str, Node)) for x in v)
-                    )
-                )
-                for k, v in states.items()
-            ):
-                return TapeType.INDEX_MANY
-
-        return None
-
-    def _add_prefix(self, key: str, with_prefix: bool = True) -> str:
+    def _add_prefix(self, key: str | None, with_prefix: bool = True) -> str:
         """
         TODO: doc prefix
         """
+        if key is None and with_prefix:
+            return f"{self.prefix}:{key}"
+        if key is None:
+            return key  # pyright: ignore[reportReturnType]
         return f"{self.prefix}:{key}" if with_prefix else key
 
     def _remove_str_prefix(self, key: str) -> str:
@@ -543,7 +617,7 @@ class StateTape:
             return key[len(p):]
         return key  # pyright: ignore[reportReturnType]
 
-    def extend(self, states: Any):
+    def extend(self, states: StatesType):
         """
         Merge in these new states with the current self.states
         Creating a temporary StateTape handles the different ways

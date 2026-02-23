@@ -10,7 +10,8 @@ import logging
 import datetime
 import re
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
+from typing import Any
 from logging.handlers import RotatingFileHandler
 
 # This makes Logger importable from logger.py
