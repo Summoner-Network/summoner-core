@@ -46,7 +46,7 @@ pub fn spawn_backpressure_monitor(
             // Log if queue size is getting large
             if policy.do_flow_control(queue_size) {
                 logger.warn(&format!("⏸️ Applying flow control to client {}: {} messages queued", addr, queue_size));
-                
+
                 if let Err(e) = command_tx.send(BackpressureCommand::FlowControl(addr)).await {
                     logger.error(&format!("Failed to send flow control command: {}", e));
                 }

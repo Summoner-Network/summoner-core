@@ -36,11 +36,11 @@ use bytes::Bytes;
 /// === MODULES ===
 // Private modules handling specific server features.
 #[rustfmt::skip]
-mod backpressure;   // queue monitoring and control commands
+mod backpressure; // queue monitoring and control commands
 #[rustfmt::skip]
-mod ratelimiter;    // per-client rate limiting
+mod ratelimiter; // per-client rate limiting
 #[rustfmt::skip]
-mod quarantine;     // temporary client bans
+mod quarantine; // temporary client bans
 
 // Import the parsed ServerConfig struct that holds all user settings.
 use crate::config::ServerConfig;

@@ -100,7 +100,7 @@ pub struct ServerConfig {
 
     /// How many incoming connections we'll buffer before backpressure
     pub connection_buffer_size: usize,
-    
+
     /// Seconds before we drop an idle client
     pub client_timeout: Option<Duration>,
     
@@ -186,7 +186,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         let host                          = extract_or(dict, "host", "127.0.0.1".to_string());
         let port                          = extract_or(dict, "port", 8888);
         let connection_buffer_size        = extract_or(dict, "connection_buffer_size", 128);
-        
+
         let rate_limit                    = extract_or(dict, "rate_limit_msgs_per_minute", 300);
         let command_buffer_size           = extract_or(dict, "command_buffer_size", 32);
         let quarantine_cooldown_secs      = extract_or(dict, "quarantine_cooldown_secs", 300);
