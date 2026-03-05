@@ -1,8 +1,13 @@
+#![allow(clippy::uninlined_format_args, clippy::manual_string_new)]
 // Import everything we need from PyO3 so we can expose Rust functions to Python.
 // - `prelude::*` gives us the common traits and types.
 // - `PyModule` and `PyDict` let us work with Python modules and dicts.
 // - `Bound` helps us hold a reference into Python data safely.
-use pyo3::{prelude::*, types::{PyModule, PyDict}, Bound};
+use pyo3::{
+    Bound,
+    prelude::*,
+    types::{PyDict, PyModule},
+};
 
 // Public module for parsing and validating server configuration provided by Python.
 pub mod config;
@@ -14,9 +19,9 @@ pub mod logger;
 mod server;
 
 // Pull in the specific items we need so we don't have to write full paths later.
+use config::ServerConfig;
 use logger::init_logger;
 use server::run_server;
-use config::ServerConfig;
 
 /// Expose this Rust function to Python as `start_tokio_server(name, config)`.
 /// Responsibilities:
@@ -33,6 +38,11 @@ use config::ServerConfig;
 /// Returns:
 /// - `Ok(())` if everything starts fine.
 /// - A Python `RuntimeError` if something goes wrong.
+///
+/// # Errors
+///
+/// A Python `RuntimeError` if something goes wrong
+#[allow(clippy::needless_pass_by_value, clippy::used_underscore_binding)]
 #[pyfunction]
 pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) -> PyResult<()> {
     // Convert the Python dict into our `ServerConfig` Rust struct.
@@ -41,6 +51,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
 
     // Build a multi-threaded Tokio runtime based on the `worker_threads` value.
     // This runtime drives all our async I/O and timers.
+    #[rustfmt::skip]
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(server_config.worker_threads)   // how many threads to use
         .thread_name("rust-server-worker")               // helpful for debugging
@@ -72,6 +83,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
     });
 
     // If the server returned an error, convert it into a Python RuntimeError.
+    #[rustfmt::skip]
     server_result.map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             format!("Server execution failed: {}", e)

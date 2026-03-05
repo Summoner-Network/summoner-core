@@ -31,6 +31,23 @@ pub struct BackpressurePolicy {
     pub disconnect_threshold: usize,
 }
 
+impl BackpressurePolicy {
+    #[must_use = "The decision of whether to throttle"]
+    pub fn do_throttle(&self, queue_size: usize) -> bool {
+        self.enable_throttle && queue_size > self.throttle_threshold
+    }
+
+    #[must_use = "The decision of whether to pause reading for chatty clients"]
+    pub fn do_flow_control(&self, queue_size: usize) -> bool {
+        self.enable_flow_control && queue_size > self.flow_control_threshold
+    }
+
+    #[must_use = "The decision of whether to do a forced disconnect"]
+    pub fn do_disconnect(&self, queue_size: usize) -> bool {
+        self.enable_disconnect && queue_size > self.disconnect_threshold
+    }
+}
+
 /////////////////////////
 // LoggerConfig        //
 /////////////////////////
@@ -58,13 +75,11 @@ pub struct LoggerConfig {
     pub date_format: String,
     // Optional list of keys to include when logging dictionary messages in JSON
     pub log_keys: Option<Vec<String>>,
-
     // Maximum number of bytes per log file before rotation occurs
     // pub max_file_size: usize,
     // Number of rotated log files to keep before older ones are deleted
     // pub backup_count: usize,
 }
-
 
 //////////////////////
 // ServerConfig     //
@@ -72,6 +87,7 @@ pub struct LoggerConfig {
 
 /// All the settings our server needs, driven by the Python-side dict
 #[derive(Debug, Clone)]
+#[rustfmt::skip]
 pub struct ServerConfig {
     /// IP or hostname to listen on (e.g. `"127.0.0.1"`)
     pub host: String,
@@ -81,7 +97,7 @@ pub struct ServerConfig {
 
     /// Logger configuration (text/JSON, file rotation, key filtering, etc.)
     pub logger: LoggerConfig,
-    
+
     /// How many incoming connections we'll buffer before backpressure
     pub connection_buffer_size: usize,
     
@@ -125,6 +141,14 @@ pub struct ServerConfig {
     pub worker_threads: usize,
 }
 
+impl ServerConfig {
+    #[must_use = "The decision of whether to throttle"]
+    #[inline]
+    pub fn addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
+
 /////////////////////////////////////////////
 // Converting from a Python dict into Rust //
 /////////////////////////////////////////////
@@ -133,8 +157,10 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
     // We return a PyErr if something goes wrong parsing
     type Error = PyErr;
 
+    #[allow(clippy::too_many_lines)]
+    #[rustfmt::skip]
     fn try_from(dict: &Bound<'py, PyDict>) -> Result<Self, PyErr> {
-        
+
         // Helper: look up `key` in the dict, or fall back to `default`.
         // If the Python value has the wrong type, we warn but still use `default`.
         fn extract_or<'py, T: FromPyObject<'py>>(
@@ -240,6 +266,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         // let max_file_size       = extract_or(&logger_dict, "max_file_size",       1_000_000);
         // let backup_count        = extract_or(&logger_dict, "backup_count",        3);
 
+        #[allow(clippy::inconsistent_struct_constructor)]
         let logger = LoggerConfig {
             log_level,
             enable_console_log,

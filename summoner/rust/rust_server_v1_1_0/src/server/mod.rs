@@ -1,5 +1,5 @@
+#![allow(clippy::empty_line_after_doc_comments)]
 /// === IMPORTS ===
-
 // Standard library type for holding an IP address and port together.
 use std::net::SocketAddr;
 
@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio::time::{self, Duration, Instant};
 
 // Macro for building JSON payloads when broadcasting client messages.
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 // Clone-on-write string type: avoids extra allocations when we don't modify the string.
 use std::borrow::Cow;
@@ -33,14 +33,14 @@ use std::borrow::Cow;
 // Reference-counted byte buffer: enables zero-copy sharing of message data.
 use bytes::Bytes;
 
-
 /// === MODULES ===
-
 // Private modules handling specific server features.
+#[rustfmt::skip]
 mod backpressure;   // queue monitoring and control commands
+#[rustfmt::skip]
 mod ratelimiter;    // per-client rate limiting
+#[rustfmt::skip]
 mod quarantine;     // temporary client bans
-
 
 // Import the parsed ServerConfig struct that holds all user settings.
 use crate::config::ServerConfig;
@@ -56,7 +56,6 @@ use crate::server::ratelimiter::RateLimiter;
 
 // Quarantine list for tracking and expiring banned clients over time.
 use crate::server::quarantine::QuarantineList;
-
 
 /// === TYPES ===
 
@@ -79,7 +78,7 @@ pub struct Client {
 // - RwLock lets many readers (e.g. broadcasts) but only one writer (add/remove) at a time.
 pub type ClientList = Arc<RwLock<Vec<Client>>>;
 
-
+#[allow(clippy::doc_markdown)]
 /// === RUN_SERVER ===
 
 /// This function launches the main server loop:
@@ -92,7 +91,7 @@ pub async fn run_server(
     logger: Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Build the "host:port" string so the OS knows where to listen
-    let addr = format!("{}:{}", config.host, config.port);
+    let addr = config.addr();
 
     // Open a TCP listener on that address; the `?` returns early on error
     let listener = TcpListener::bind(&addr).await?;
@@ -114,11 +113,13 @@ pub async fn run_server(
         mpsc::channel::<(SocketAddr, usize)>(config.connection_buffer_size);
 
     // Channel used by the backpressure monitor to send commands (Throttle, Disconnect, etc.)
+    #[rustfmt::skip]
     let (command_tx, command_rx) =
         mpsc::channel::<BackpressureCommand>(config.command_buffer_size);
 
     // Track which clients are quarantined (banned temporarily)
     // Wrapped in Arc+Mutex for safe, exclusive access when marking or cleaning entries
+    #[rustfmt::skip]
     let quarantine_list = Arc::new(Mutex::new(
         QuarantineList::new(Duration::from_secs(config.quarantine_cooldown_secs))
     ));
@@ -190,6 +191,8 @@ fn spawn_shutdown_listener(
 /// === CONNECTIONS ===
 
 /// Listens for new clients, spawns per-client tasks, and handles shutdown/backpressure
+#[allow(clippy::too_many_arguments)]
+#[rustfmt::skip]
 async fn accept_connections(
     listener: TcpListener,                      // TCP socket we bound in run_server
     clients: ClientList,                        // Shared list of connected clients
@@ -274,10 +277,11 @@ async fn handle_backpressure_command(
 
         BackpressureCommand::Throttle(addr) | BackpressureCommand::FlowControl(addr) => {
             // Decide which control command to send
+            #[rustfmt::skip]
             let control_cmd = match cmd {
                 BackpressureCommand::Throttle(_)    => ClientCommand::Throttle,
                 BackpressureCommand::FlowControl(_) => ClientCommand::FlowControl,
-                _ => unreachable!(),
+                BackpressureCommand::Disconnect(_)  => unreachable!(),
             };
 
             // Under a short read lock, grab a clone of the sender if the client still exists
@@ -297,10 +301,12 @@ async fn handle_backpressure_command(
                         control_cmd, addr, e
                     ));
                 }
+                #[rustfmt::skip]
                 let emoji = match control_cmd {
                     ClientCommand::Throttle    => "⏳",
                     ClientCommand::FlowControl => "⏸️",
                 };
+                #[rustfmt::skip]
                 logger.info(&format!("{} {:?} requested for {}", emoji, control_cmd, addr));
             } else {
                 logger.warn(&format!(
@@ -313,6 +319,8 @@ async fn handle_backpressure_command(
 }
 
 /// Validates a new TCP connection and then spawns its session task
+#[allow(clippy::too_many_arguments)]
+#[rustfmt::skip]
 async fn handle_new_connection(
     stream: TcpStream,                           // The raw TCP connection
     addr: SocketAddr,                            // Remote client address (IP:port)
@@ -404,7 +412,6 @@ async fn handle_new_connection(
         let remaining = connection_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
         logger.info(&format!("🔌 {} disconnected. Active connections: {}", addr, remaining));
     });
-
 }
 
 /// Manages a single client's session:
@@ -412,6 +419,7 @@ async fn handle_new_connection(
 /// - Reports backpressure without blocking
 /// - Enforces inactivity timeouts and graceful shutdown
 /// - On exit, removes the client from the shared list and logs the remaining count
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     reader_half: tokio::net::tcp::OwnedReadHalf,
     client: Client,
@@ -446,6 +454,7 @@ async fn handle_connection(
     .await
     {
         // Log any unexpected error during the session
+        #[rustfmt::skip]
         logger.warn(&format!("⚠️ Error in client {} session: {}", client.addr, e));
     }
 
@@ -465,7 +474,6 @@ async fn handle_connection(
     Ok(())
 }
 
-
 /// === MESSAGES ===
 
 /// Manages a single client session until disconnect or shutdown:
@@ -473,6 +481,7 @@ async fn handle_connection(
 /// - Responds to throttle and flow-control commands  
 /// - Enforces inactivity timeouts  
 /// - Sends a shutdown notice on server exit  
+#[allow(clippy::too_many_arguments)]
 async fn handle_client_messages(
     // Line-based reader for this client's incoming data
     reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
@@ -502,6 +511,7 @@ async fn handle_client_messages(
     let mut last_active = Instant::now();
 
     // Timer that fires every `timeout_check_interval_secs` to enforce inactivity
+    #[rustfmt::skip]
     let mut timeout_interval = time::interval(Duration::from_secs(
         config.timeout_check_interval_secs,
     ));
@@ -566,6 +576,7 @@ async fn handle_client_messages(
 
             // 4) Check for inactivity timeout
             _ = timeout_interval.tick() => {
+                #[allow(clippy::collapsible_if)]
                 if let Some(timeout) = timeout {
                     if last_active.elapsed() > timeout {
                         // Send a warning to the client then break
@@ -664,6 +675,8 @@ async fn process_client_line(
     let envelope_text = envelope.to_string();
 
     // 3) Parse the client's content *once*
+    #[allow(clippy::needless_borrow)]
+    #[rustfmt::skip]
     let json_content: JsonValue = serde_json::from_str(&content).unwrap_or(JsonValue::String(content.to_string()));
 
     // 4) Move it into pruning or keep it as-is
@@ -705,6 +718,7 @@ fn remove_last_newline(s: &str) -> &str {
 }
 
 /// Sends `msg` to every client except the sender, reporting queue size for backpressure:
+#[rustfmt::skip]
 async fn broadcast_message(
     clients: &ClientList,               // Shared list of all connected clients
     sender: &Client,                    // The client who sent the original message

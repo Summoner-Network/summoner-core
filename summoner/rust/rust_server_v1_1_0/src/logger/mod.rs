@@ -21,8 +21,10 @@ use crate::config::LoggerConfig;
 
 /// Given the *parsed* content (a JSON value) and an optional
 /// whitelist of keys, prune its `_payload` and `_type` sub-objects
-/// if `keys` is Some, then return the resulting JsonValue.
+/// if `keys` is Some, then return the resulting `JsonValue`.
 /// This consumes `content`, so no cloning is needed by the caller.
+#[allow(clippy::must_use_candidate)]
+#[rustfmt::skip]
 pub fn prune_content_value(
     mut content: JsonValue,
     keys: &Option<Vec<String>>,
@@ -32,7 +34,10 @@ pub fn prune_content_value(
         Some(m) if keys.is_some() => m,
         _ => return content,
     };
-    let keys = keys.as_ref().unwrap();
+    #[allow(clippy::missing_panics_doc)]
+    let keys = keys
+        .as_ref()
+        .expect("If keys was None, then it would have gone through early return");
 
     // 2) Build a fresh map with version + filtered sub-objects
     let mut out = serde_json::Map::new();
@@ -46,13 +51,12 @@ pub fn prune_content_value(
                 .filter(|(k, _)| keys.contains(k))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
-            out.insert(field.to_string(), JsonValue::Object(filtered));
+            out.insert((*field).to_string(), JsonValue::Object(filtered));
         }
     }
 
     JsonValue::Object(out)
 }
-
 
 /// A simple Logger struct that wraps logging functions.
 /// Clonable to allow use across multiple threads/tasks.
@@ -87,8 +91,8 @@ static LOGGER: OnceLock<Logger> = OnceLock::new();
 /// Initialize the global logger exactly once, according to the provided settings.
 /// After this call, all calls to `log::debug!(), info!(), warn!(), error!()` (and your
 /// `Logger` methods) will go through the configured fern dispatcher.
+#[rustfmt::skip]
 pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
-    
     LOGGER.get_or_init(|| {
         // ────────────────────────────────────────────────────────────────
         // 1) Parse the configured level string into a log::LevelFilter
@@ -128,7 +132,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                     nm,
                     record.level(),
                     message
-                ))
+                ));
             };
 
             base = base.chain(
@@ -157,6 +161,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
             let enable_json = cfg.enable_json_log;
 
             // Compute the logfile path
+            #[rustfmt::skip]
             let filepath = if cfg.log_file_path.is_empty() {
                 format!("{}.log", nm.replace('.', "_"))
             } else {
@@ -172,6 +177,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                 if enable_json {
                     // 1) Raw payload text
                     let raw = message.to_string();
+                    #[rustfmt::skip]
                     let message_json: JsonValue = serde_json::from_str(&raw).unwrap_or(JsonValue::String(raw.clone()));
 
                     // 2) Build a real JSON envelope with "message" as an object
@@ -183,7 +189,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                     });
 
                     // 4) Emit the envelope unescaped
-                    out.finish(format_args!("{}", envelope))
+                    out.finish(format_args!("{}", envelope));
                 } else {
                     // Plain-text path
                     out.finish(format_args!(
@@ -192,7 +198,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
                         nm,
                         record.level(),
                         message
-                    ))
+                    ));
                 }
             };
 
@@ -216,6 +222,7 @@ pub fn init_logger(name: &str, cfg: &LoggerConfig) -> Logger {
         // 5) Apply the composed dispatcher as the global logger
         //    Any subsequent log:: calls will use this configuration.
         // ────────────────────────────────────────────────────────────────
+        #[allow(clippy::missing_panics_doc)]
         base.apply().unwrap();
 
         // Return our zero-sized Logger handle
