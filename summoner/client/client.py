@@ -1049,10 +1049,8 @@ class SummonerClient:
                             batches.setdefault(receiver.priority, [])
                             batches[receiver.priority].append(receiver.fn)
 
-                    # ----[ Empty: Skip and Prevent Client Overwhelming ]----
+                    # ----[ Empty: No Matching Receiver For This Payload ]----
                     if not batches:
-                        _ = await reader.readline() # Space
-                        await asyncio.sleep(0.1) # Time
                         continue
                     
                     # ----[ Exec: Prepare Passage Receiver → Sender ]----
