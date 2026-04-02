@@ -121,3 +121,16 @@ def test_event_and_action_classes_and_extract_signal():
     assert extract_signal(None) is None
     with pytest.raises(TypeError):
         extract_signal(123)
+
+
+def test_event_can_store_optional_data():
+    Trigger = load_triggers(json_dict={"X": None})
+    sigX = Trigger.X
+
+    move_evt = Move(sigX, data={"payload": 7})
+    stay_evt = Stay(sigX)
+
+    assert move_evt.data == {"payload": 7}
+    assert stay_evt.data is None
+    assert extract_signal(move_evt) is sigX
+    assert "data={'payload': 7}" in repr(move_evt)

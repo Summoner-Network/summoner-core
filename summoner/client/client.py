@@ -387,6 +387,8 @@ class SummonerClient:
             route: str, 
             priority: Union[int, tuple[int, ...]] = ()
         ):
+        if not isinstance(route, str):
+            raise TypeError(f"Argument `route` must be string. Provided: {route}")
         route = route.strip()
         def decorator(fn: Callable[[Union[str, dict]], Awaitable[Optional[Event]]]):
             
@@ -406,9 +408,6 @@ class SummonerClient:
                 allow_return=(type(None), Event, Any),
                 logger=self.logger,
             )
-
-            if not isinstance(route, str):
-                raise TypeError(f"Argument `route` must be string. Provided: {route}")
 
             if isinstance(priority, int):
                 tuple_priority = (priority,)
@@ -467,40 +466,52 @@ class SummonerClient:
             multi: bool = False, 
             on_triggers: Optional[set[Signal]] = None,
             on_actions: Optional[set[Type]] = None,
+            use_data: bool = False,
         ):
+        if not isinstance(route, str):
+            raise TypeError(f"Argument `route` must be string. Provided: {route}")
         route = route.strip()
-        def decorator(fn: Callable[[], Awaitable]):
+        def decorator(fn: Callable[..., Awaitable]):
             
             # ----[ Safety Checks ]----
             if not inspect.iscoroutinefunction(fn):
                 raise TypeError(f"@send sender '{fn.__name__}' must be async")
             
-            sig = inspect.signature(fn)
-            if len(sig.parameters) != 0:
-                raise TypeError(f"@send '{fn.__name__}' must accept no arguments")
-            
+            expected_params = 1 if use_data else 0
+            decorator_name = "@send"
+            if multi and use_data:
+                decorator_name = "@send[multi=True,use_data=True]"
+            elif multi:
+                decorator_name = "@send[multi=True]"
+            elif use_data:
+                decorator_name = "@send[use_data=True]"
+
             if not multi:
                 _check_param_and_return(
                     fn,
-                    decorator_name="@send",
-                    allow_param=(),   # no args allowed
+                    decorator_name=decorator_name,
+                    allow_param=(Any,) if use_data else (),   # one data arg when enabled
                     allow_return=(type(None), Any, str, dict),
                     logger=self.logger,
+                    expected_params=expected_params,
+                    skip_param_type_check=use_data,
                 )
             else:
                 _check_param_and_return(
                     fn,
-                    decorator_name="@send[multi=True]",
-                    allow_param=(),   # no args allowed
+                    decorator_name=decorator_name,
+                    allow_param=(Any,) if use_data else (),   # one data arg when enabled
                     allow_return=(Any, list, list[str], list[dict], list[Union[str, dict]]),
                     logger=self.logger,
+                    expected_params=expected_params,
+                    skip_param_type_check=use_data,
                 )
         
-            if not isinstance(route, str):
-                raise TypeError(f"Argument `route` must be string. Provided: {route}")
-
             if not isinstance(multi, bool):
                 raise TypeError(f"Argument `multi` must be Boolean. Provided: {multi}")
+
+            if not isinstance(use_data, bool):
+                raise TypeError(f"Argument `use_data` must be Boolean. Provided: {use_data}")
 
             if on_triggers is not None and (
                 not isinstance(on_triggers, set) or
@@ -513,6 +524,17 @@ class SummonerClient:
                 not all(isinstance(act, type) and issubclass(act, Event) and act in {Action.MOVE, Action.STAY, Action.TEST} for act in on_actions)
             ):
                 raise TypeError(f"Argument `on_actions` must be `None` or a set of Action event classes: {{Action.MOVE, Action.STAY, Action.TEST}}. Provided: {on_actions!r}")
+
+            reactive_filters = (
+                (isinstance(on_triggers, set) and bool(on_triggers)) or
+                (isinstance(on_actions, set) and bool(on_actions))
+            )
+
+            if use_data and not reactive_filters:
+                raise ValueError("Argument `use_data=True` requires a non-empty `on_triggers` or `on_actions` set so the sender has queued event data to receive")
+
+            if use_data and not self._flow.in_use:
+                raise RuntimeError("Argument `use_data=True` requires `client.flow().activate()` before sender registration")
             
             # ----[ DNA capture ]----
             self._dna_senders.append({
@@ -521,13 +543,14 @@ class SummonerClient:
                 "multi": multi,
                 "on_triggers": on_triggers,
                 "on_actions": on_actions,
+                "use_data": use_data,
                 "source": inspect.getsource(fn),
             })
 
             # ----[ Registration Code ]----
             async def register():
                 
-                sender = Sender(fn=fn, multi=multi, actions=on_actions, triggers=on_triggers)
+                sender = Sender(fn=fn, multi=multi, actions=on_actions, triggers=on_triggers, use_data=use_data)
                 actions_exist = isinstance(on_actions, set) and bool(on_actions)
                 triggers_exist = isinstance(on_triggers, set) and bool(on_triggers)
                 
@@ -759,18 +782,20 @@ class SummonerClient:
                 route_key = raw_route
             route_key = "".join(str(route_key).split())
 
-            entries.append({
+            entry = {
                 "type": "send",
                 "route": raw_route,          # original route string
                 "route_key": route_key,     # stable route representative
                 "multi": dna["multi"],
+                "use_data": dna["use_data"],
                 # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
                 "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
                 "source": get_callable_source(fn, dna.get("source")),
                 "module": fn.__module__,
                 "fn_name": fn.__name__,
-            })
+            }
+            entries.append(entry)
 
         # All hooks
         for dna in self._dna_hooks:
@@ -1128,14 +1153,17 @@ class SummonerClient:
 
         while True:
             
-            item: Optional[tuple[str, Sender]] = await self.send_queue.get()
+            item: Optional[tuple[str, Sender, Any]] = await self.send_queue.get()
             if item is None:
                 self.send_queue.task_done()
                 break
             
-            route, sender = item
+            route, sender, sender_data = item
             try:
-                result = await sender.fn()
+                if sender.use_data:
+                    result = await sender.fn(sender_data)
+                else:
+                    result = await sender.fn()
 
                 # ----[ Urgent: Handle Aborts ]----
                 async with self.connection_lock:
@@ -1263,9 +1291,10 @@ class SummonerClient:
                     pending.sort(key=lambda it: hook_priority_order(it[0]))
 
                 # ----[ Build Sender Batch ]---- 
-                senders: list[tuple[str, Sender]] = []
+                senders: list[tuple[str, Sender, Any]] = []
 
                 # De-dup set: at most one sender per (route, key-from-recv, recv-handler-name) this cycle.
+                # `use_data=True` senders intentionally bypass this so each queued event payload is delivered.
                 emitted: set[tuple[str, Optional[str], str]] = set()
 
                 for route, routed_senders in sender_index.items():
@@ -1273,7 +1302,13 @@ class SummonerClient:
                         
                         # Non-reactive (no actions/triggers): preserve current behavior
                         if (not self._flow.in_use) or (sender.actions is None and sender.triggers is None):
-                            senders.append((route, sender))
+                            if sender.use_data:
+                                self.logger.warning(
+                                    f"Skipping sender '{sender.fn.__name__}' on route '{route}': "
+                                    "use_data=True requires a reactive sender running with flow enabled"
+                                )
+                                continue
+                            senders.append((route, sender, None))
                         
                         # Reactive: require matching a pending activation (existential)
                         elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or 
@@ -1283,12 +1318,18 @@ class SummonerClient:
                             if sender_parsed_route is None:
                                 continue
                             
-                            # Iterate pending in queue order; first match "wins" for this (route,key,fn_name)
-                            for (priority, key, parsed_route, event) in pending:
+                            # Iterate pending in queue order.
+                            # `use_data=True` senders receive one call per matching queued event.
+                            # Other reactive senders keep the existing first-match de-dup behavior.
+                            for (_priority, key, parsed_route, event) in pending:
                                 if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
+                                    if sender.use_data:
+                                        senders.append((route, sender, event.data))
+                                        continue
+
                                     dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
                                     if dedup_key not in emitted:
-                                        senders.append((route, sender))
+                                        senders.append((route, sender, None))
                                         emitted.add(dedup_key)
                                     break  # do not enqueue multiple times for this sender this cycle
                                     

@@ -144,23 +144,28 @@ def test_sender_responds_to_filters():
     test_evt = TestEvt(sigX)
 
     # 1) No filters → always responds
-    sender1 = Sender(fn=lambda: None, multi=False, actions=None, triggers=None)
+    sender1 = Sender(fn=lambda: None, multi=False, actions=None, triggers=None, use_data=False)
     assert sender1.responds_to(move_evt)
     assert sender1.responds_to(stay_evt)
 
     # 2) on_actions only
-    sender_actions = Sender(fn=lambda: None, multi=False, actions={Action.MOVE}, triggers=None)
+    sender_actions = Sender(fn=lambda: None, multi=False, actions={Action.MOVE}, triggers=None, use_data=False)
     assert sender_actions.responds_to(move_evt)
     assert not sender_actions.responds_to(stay_evt)
 
     # 3) on_triggers only — any event carrying sigX is accepted
-    sender_triggers = Sender(fn=lambda: None, multi=False, actions=None, triggers={sigX})
+    sender_triggers = Sender(fn=lambda: None, multi=False, actions=None, triggers={sigX}, use_data=False)
     assert sender_triggers.responds_to(move_evt)
     assert sender_triggers.responds_to(test_evt)      # ← change to True
     assert not sender_triggers.responds_to(stay_evt)  # different signal Y
 
     # 4) both filters
-    sender_both = Sender(fn=lambda: None, multi=False, actions={Action.STAY}, triggers={sigY})
+    sender_both = Sender(fn=lambda: None, multi=False, actions={Action.STAY}, triggers={sigY}, use_data=False)
     assert sender_both.responds_to(stay_evt)
     assert not sender_both.responds_to(StayEvt(sigX))
     assert not sender_both.responds_to(move_evt)
+
+
+def test_sender_use_data_defaults_to_false():
+    sender = Sender(fn=lambda: None, multi=False, actions=None, triggers=None)
+    assert sender.use_data is False

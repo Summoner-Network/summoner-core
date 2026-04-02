@@ -222,11 +222,14 @@ def build_triggers(tree: dict[str, Any]):
 
 
 class Event:
-    __slots__ = ("signal",)
-    def __init__(self, signal: Signal) -> None:
+    __slots__ = ("signal", "data")
+    def __init__(self, signal: Signal, data: Any = None) -> None:
         self.signal = signal
+        self.data = data
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self.signal!r})"
+        if self.data is None:
+            return f"{type(self).__name__}({self.signal!r})"
+        return f"{type(self).__name__}({self.signal!r}, data={self.data!r})"
 
 
 class Move(Event): pass
@@ -287,4 +290,3 @@ def load_triggers(
             f"Could not find triggers file at {path if 'path' in locals() else '<provided text or dict>'}"
         ) from e
     return build_triggers(tree)
-

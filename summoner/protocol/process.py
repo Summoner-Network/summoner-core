@@ -304,13 +304,28 @@ class ParsedRoute:
 
 # ======= PROTOCOL: SEND / RECEIVE =======
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Sender:
-    __slots__ = ('fn', 'multi', 'actions', 'triggers')
-    fn: Callable[[], Awaitable]
+    __slots__ = ('fn', 'multi', 'actions', 'triggers', 'use_data')
+    fn: Callable[..., Awaitable]
     multi: bool
     actions: Optional[set[Type]]
     triggers: Optional[set[Signal]]
+    use_data: bool
+
+    def __init__(
+            self,
+            fn: Callable[..., Awaitable],
+            multi: bool,
+            actions: Optional[set[Type]],
+            triggers: Optional[set[Signal]],
+            use_data: bool = False,
+        ):
+        object.__setattr__(self, "fn", fn)
+        object.__setattr__(self, "multi", multi)
+        object.__setattr__(self, "actions", actions)
+        object.__setattr__(self, "triggers", triggers)
+        object.__setattr__(self, "use_data", use_data)
 
     def responds_to(self, event: Any) -> bool:
         action_check = True
@@ -522,4 +537,3 @@ class ClientIntent(Enum):
     QUIT      = auto()   # brutal, immediate exit
     TRAVEL    = auto()   # switch to a new host/port
     ABORT  = auto()   # abort due to error
-
