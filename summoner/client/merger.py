@@ -49,7 +49,7 @@ Do not run untrusted DNA.
 """
 
 from importlib import import_module
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from contextlib import suppress
 from pathlib import Path
 import inspect
@@ -164,6 +164,97 @@ def _read_required_mapping_field(entry: dict[str, Any], field: str):
     if field not in entry:
         raise KeyError(f"Missing required DNA field '{field}'")
     return entry[field]
+
+
+def _resolve_callable_reference(globals_dict: dict[str, Any], ref: Optional[str]) -> Optional[Callable[..., Any]]:
+    if not isinstance(ref, str) or not ref:
+        return None
+
+    if ":" in ref:
+        module_name, qualname = ref.split(":", 1)
+        try:
+            obj = import_module(module_name)
+        except Exception:
+            obj = None
+
+        if obj is not None:
+            try:
+                for part in qualname.split("."):
+                    if part == "<locals>":
+                        return None
+                    obj = getattr(obj, part)
+                if callable(obj):
+                    return obj
+            except Exception:
+                pass
+
+        fallback_name = qualname.split(".")[-1]
+        fallback = globals_dict.get(fallback_name)
+        if callable(fallback):
+            return fallback
+        return None
+
+    candidate = globals_dict.get(ref)
+    if callable(candidate):
+        return candidate
+    return None
+
+
+def _resolve_callable_reference_from_source(
+        globals_dict: dict[str, Any],
+        ref: Optional[str],
+        source: Optional[str],
+    ) -> Optional[Callable[..., Any]]:
+    if not isinstance(source, str) or not source.strip():
+        return None
+
+    expected_name = None
+    if isinstance(ref, str) and ref:
+        if ":" in ref:
+            _, qualname = ref.split(":", 1)
+            if "<locals>" not in qualname:
+                expected_name = qualname.split(".")[-1]
+        else:
+            expected_name = ref
+
+    if not isinstance(expected_name, str) or not expected_name or expected_name == "<lambda>":
+        return None
+
+    try:
+        if "__builtins__" not in globals_dict:
+            globals_dict["__builtins__"] = __builtins__
+        exec(compile(textwrap.dedent(source), filename="<summoner_run_while>", mode="exec"), globals_dict)
+    except Exception:
+        return None
+
+    candidate = globals_dict.get(expected_name)
+    if callable(candidate):
+        return candidate
+    return None
+
+
+def _resolve_run_while_spec(
+        globals_dict: dict[str, Any],
+        kind: str,
+        value: Any,
+        name: Optional[str],
+        source: Optional[str] = None,
+    ) -> Any:
+    if kind == "none":
+        return None
+    if kind == "bool":
+        return bool(value)
+    if kind == "callable":
+        resolved = _resolve_callable_reference(globals_dict, name)
+        if not callable(resolved):
+            resolved = _resolve_callable_reference_from_source(globals_dict, name, source)
+        if callable(resolved):
+            return resolved
+        raise ValueError(
+            "Could not resolve serialized run_while callable "
+            f"{name!r} from available replay context"
+        )
+    raise ValueError(f"Unknown run_while kind {kind!r}")
 
 
 class ClientMerger(SummonerClient):
@@ -792,19 +883,34 @@ class ClientMerger(SummonerClient):
         if not self._flow.in_use:
             for src in self.sources:
                 if src["kind"] == "client":
-                    if any(dna.get("use_data", False) for dna in src["client"]._dna_senders):
+                    if any(
+                        dna.get("use_data", False) or (
+                            dna.get("every") is not None and (
+                                (dna.get("on_triggers") or []) or
+                                (dna.get("on_actions") or [])
+                            )
+                        )
+                        for dna in src["client"]._dna_senders
+                    ):
                         raise RuntimeError(
                             "ClientMerger.flow().activate() must be called before initiate_senders() "
-                            "when replaying senders with use_data=True"
+                            "when replaying reactive timed senders or senders with use_data=True"
                         )
                 else:
                     if any(
-                        entry.get("type") == "send" and entry.get("use_data", False)
+                        entry.get("type") == "send" and (
+                            entry.get("use_data", False) or (
+                                entry.get("every") is not None and (
+                                    (entry.get("on_triggers") or []) or
+                                    (entry.get("on_actions") or [])
+                                )
+                            )
+                        )
                         for entry in src["dna_entries"]
                     ):
                         raise RuntimeError(
                             "ClientMerger.flow().activate() must be called before initiate_senders() "
-                            "when replaying senders with use_data=True"
+                            "when replaying reactive timed senders or senders with use_data=True"
                         )
 
         for src in self.sources:
@@ -815,12 +921,24 @@ class ClientMerger(SummonerClient):
                     fn_clone = self._clone_handler(dna["fn"], var_name)
                     try:
                         route = _read_required_mapping_field(dna, "route")
+                        run_while = dna.get("run_while")
+                        if run_while is None:
+                            run_while = _resolve_run_while_spec(
+                                fn_clone.__globals__,
+                                dna.get("run_while_kind", "none"),
+                                dna.get("run_while_value", None),
+                                dna.get("run_while_name", None),
+                                dna.get("run_while_source", None),
+                            )
                         self.send(
                             route,
                             multi=dna.get("multi", False),
                             on_triggers=dna.get("on_triggers"),
                             on_actions=dna.get("on_actions"),
                             use_data=dna.get("use_data", False),
+                            data_mode=dna.get("data_mode", None),
+                            every=dna.get("every", None),
+                            run_while=run_while,
                         )(fn_clone)
                     except Exception as e:
                         self.logger.warning(
@@ -846,12 +964,22 @@ class ClientMerger(SummonerClient):
                             g["Trigger"] = TriggerCls
                         on_triggers = {_resolve_trigger(TriggerCls, t) for t in trigger_names} or None
                     on_actions = {_resolve_action(Action, a) for a in entry.get("on_actions", [])} or None
+                    run_while = _resolve_run_while_spec(
+                        g,
+                        entry.get("run_while_kind", "none"),
+                        entry.get("run_while_value", None),
+                        entry.get("run_while_name", None),
+                        entry.get("run_while_source", None),
+                    )
                     dec = self.send(
                         route,
                         multi=entry.get("multi", False),
                         on_triggers=on_triggers,
                         on_actions=on_actions,
                         use_data=entry.get("use_data", False),
+                        data_mode=entry.get("data_mode", None),
+                        every=entry.get("every", None),
+                        run_while=run_while,
                     )
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
@@ -1171,12 +1299,19 @@ class ClientTranslation(SummonerClient):
           - Action is resolved from the Action container by name
         """
         if (not self._flow.in_use) and any(
-            entry.get("type") == "send" and entry.get("use_data", False)
+            entry.get("type") == "send" and (
+                entry.get("use_data", False) or (
+                    entry.get("every") is not None and (
+                        (entry.get("on_triggers") or []) or
+                        (entry.get("on_actions") or [])
+                    )
+                )
+            )
             for entry in self._dna_list
         ):
             raise RuntimeError(
                 "ClientTranslation.flow().activate() must be called before initiate_senders() "
-                "when replaying senders with use_data=True"
+                "when replaying reactive timed senders or senders with use_data=True"
             )
 
         g = self._sandbox_globals
@@ -1199,12 +1334,22 @@ class ClientTranslation(SummonerClient):
                     g["Trigger"] = TriggerCls
                 on_triggers = {_resolve_trigger(TriggerCls, t) for t in trigger_names} or None
             on_actions  = {_resolve_action(Action, a) for a in entry.get("on_actions", [])} or None
+            run_while = _resolve_run_while_spec(
+                g,
+                entry.get("run_while_kind", "none"),
+                entry.get("run_while_value", None),
+                entry.get("run_while_name", None),
+                entry.get("run_while_source", None),
+            )
             dec = self.send(
                 route,
                 multi=entry.get("multi", False),
                 on_triggers=on_triggers,
                 on_actions=on_actions,
                 use_data=entry.get("use_data", False),
+                data_mode=entry.get("data_mode", None),
+                every=entry.get("every", None),
+                run_while=run_while,
             )
             self._apply_with_source_patch(dec, fn, entry["source"])
 
