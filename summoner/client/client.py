@@ -108,57 +108,57 @@ class SummonerClient:
 
     def __init__(self, name: Optional[str] = None):
         
-        # Give a name to the server
+        # Give the client a name
         self.name = name if isinstance(name, str) else "<client:no-name>"
         
-        # Create a bare logger (no handlers yet)
+        # Create a bare logger with no handlers yet
         self.logger: Logger = get_logger(self.name)
 
         # Create a new event loop
         self.loop = asyncio.new_event_loop()
 
-        # Set the new loop as the current thread
+        # Set the current event loop for this thread
         asyncio.set_event_loop(self.loop)
 
-        # Protect concurrent access to the set of active tasks
+        # Protect access to active tasks
         self.active_tasks: set[asyncio.Task] = set()
         self.tasks_lock = asyncio.Lock()
 
-        # Protect route registration and access for receive/send functions
+        # Protect route registration and lookup for receivers and senders
         self.receiver_index: dict[str, Receiver] = {}
-        self.sender_index: dict[str, list[Sender]] = {} # do not use defaultdict(list) because we use .get
+        self.sender_index: dict[str, list[Sender]] = {} # Do not use defaultdict(list) because we rely on .get().
         self.routes_lock = asyncio.Lock()
 
-        # Dynamic routing configuration (can be changed at runtime)
+        # Store routing information that can change at runtime
         self.host: Optional[str] = None
         self.port: Optional[int] = None
-        self._travel = False # Flag to signal intent to travel
-        self._quit = False # Flag to signal intent to shutdown the client
+        self._travel = False # Flag the intent to travel.
+        self._quit = False # Flag the intent to shut down the client.
         self.connection_lock = asyncio.Lock()
 
-        # Safe registration of decorators (hooks, receivers, senders)
+        # Track decorator registration tasks
         self._registration_tasks: list[asyncio.Task] = []
 
-        # One-time indexing of parsed routes
+        # Cache parsed routes
         self.receiver_parsed_routes: dict[str, ParsedRoute] = {}
         self.sender_parsed_routes: dict[str, ParsedRoute] = {}
 
-        # Flow representing the underlying finite state machine
+        # Store the client's flow
         self._flow = Flow()
 
-        # Functions to read and write the flow's active states in memory
+        # Store callbacks that read and write active states
         self._upload_states: Optional[Callable[[Any], Awaitable]] = None
         self._download_states: Optional[Callable[[Any], Awaitable]] = None
 
         self.event_bridge_maxsize = None
-        self.max_concurrent_workers = None # Limit the sending rate (will use 50 if None is given)
+        self.max_concurrent_workers = None # Limit sender concurrency. Uses the configured default when None.
         self.send_queue_maxsize = None
         self.max_bytes_per_line = None
-        self.read_timeout_seconds = None # None is prefered
+        self.read_timeout_seconds = None # Wait indefinitely when None.
         self.retry_delay_seconds = None
         self.batch_drain = None
 
-        # Pass Event information from the receiving end to the sending end
+        # Pass events from receivers to senders
         self.event_bridge: Optional[asyncio.Queue[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]] = None
 
         # Sender-side orchestration runtime. These structures belong to the
@@ -179,8 +179,8 @@ class SummonerClient:
         self.receiving_hooks: dict[tuple[int,...], Callable[[Union[str, dict]], Union[str, dict]]] = {}
         self.hooks_lock = asyncio.Lock()
 
-        # ─── DNA capture for merging ─────────────────────────────────────────
-        # lists of dicts, each entry records one decorated handler
+        # Store DNA entries for cloning and merging.
+        # Each list records decorated handlers of one kind.
         self._dna_receivers: list[dict] = []
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
@@ -188,7 +188,7 @@ class SummonerClient:
         self._dna_upload_states: Optional[dict] = None
         self._dna_download_states: Optional[dict] = None
 
-    # ==== VERSION SPECIFIC ====
+    # ==== CLIENT SETUP ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
 
@@ -236,6 +236,8 @@ class SummonerClient:
     def flow(self) -> Flow:
         return self._flow
     
+    # ==== CLIENT CONTROL ====
+
     async def travel_to(self, host, port):
         async with self.connection_lock:
             self.host = host
@@ -251,6 +253,8 @@ class SummonerClient:
         async with self.connection_lock:
             self._quit = False
             self._travel = False
+
+    # ==== STATE HOOKS ====
 
     def upload_states(self):
         """
@@ -713,7 +717,7 @@ class SummonerClient:
 
         return decorator
 
-    # ==== DNA PROCESSING ====
+    # ==== DNA EXPORT ====
 
     def _iter_registered_handler_functions(self):
         """
@@ -1928,7 +1932,7 @@ class SummonerClient:
                         # swallow during shutdown
                         break
 
-    # ==== HANDLE BOTH SENDING AND RECEIVING ENDS ====
+    # ==== SESSION HANDLING ====
 
     async def handle_session(self, host: str = '127.0.0.1', port: int = 8888):
         """
@@ -2036,17 +2040,13 @@ class SummonerClient:
             task.cancel()
             
     def set_termination_signals(self):
-        """
-        Install SIGINT/SIGTERM handlers onto the loop:
-            - SIGINT: interupt signal for Ctrl+C | value = 2
-            - SIGTERM: system/process-based termination | value = 15
-        """
+        """Install SIGINT and SIGTERM handlers on the event loop."""
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 self.loop.add_signal_handler(sig, self.shutdown)
         else:
             def _handler(sig, frame):
-                # thread-safe: schedule shutdown on the event loop
+                # Schedule shutdown on the event loop in a thread-safe way.
                 try:
                     self.loop.call_soon_threadsafe(self.shutdown)
                 except RuntimeError:
