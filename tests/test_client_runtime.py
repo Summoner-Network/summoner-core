@@ -7,7 +7,7 @@ from summoner.protocol import Action
 from summoner.protocol.payload import wrap_with_types
 from summoner.protocol.process import Direction, Node
 from summoner.protocol.triggers import load_triggers
-from tests.helpers import DummyWriter
+from .helpers import DummyWriter
 
 
 def test_message_receiver_loop_applies_receive_hooks_updates_state_and_bridges_events():

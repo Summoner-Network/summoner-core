@@ -12,7 +12,7 @@ from summoner.client.client import SummonerClient
 from summoner.protocol import Action
 from summoner.protocol.process import Direction
 from summoner.protocol.triggers import load_triggers
-from tests.helpers import DummyWriter
+from .helpers import DummyWriter
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
