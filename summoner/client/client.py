@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import copy
 from typing import (
     Optional, 
     Callable, 
@@ -12,7 +13,8 @@ from typing import (
 import asyncio
 import signal
 import inspect
-from collections import defaultdict
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 import platform
 
 target_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -63,6 +65,32 @@ class ServerDisconnected(Exception):
     """Raised when the server closes the connection."""
     pass
 
+
+# ==== CLIENT-INTERNAL SENDER RUNTIME TYPES ====
+#
+# These types stay in `client.py` on purpose: they model the local scheduling
+# and worker runtime of one Summoner client instance, not protocol-level send
+# semantics shared across modules.
+
+@dataclass
+class SendInvocation:
+    """Internal queue item for one sender invocation."""
+    route: str
+    sender: Sender
+    data: Any = None
+    done: Optional[asyncio.Future] = None
+
+
+@dataclass
+class TimedSenderRuntime:
+    """Internal per-sender scheduler state for timed senders."""
+    armed: bool = False
+    running: bool = False
+    pending_payloads: deque[Any] = field(default_factory=deque)
+    next_run_at: Optional[float] = None
+    in_flight_done: Optional[asyncio.Future] = None
+    run_while_task: Optional[asyncio.Task] = None
+
 class SummonerClient:
 
     DEFAULT_MAX_BYTES_PER_LINE = 64 * 1024      # 64 KiB
@@ -80,60 +108,68 @@ class SummonerClient:
 
     def __init__(self, name: Optional[str] = None):
         
-        # Give a name to the server
+        # Give the client a name
         self.name = name if isinstance(name, str) else "<client:no-name>"
         
-        # Create a bare logger (no handlers yet)
+        # Create a bare logger with no handlers yet
         self.logger: Logger = get_logger(self.name)
 
         # Create a new event loop
         self.loop = asyncio.new_event_loop()
 
-        # Set the new loop as the current thread
+        # Set the current event loop for this thread
         asyncio.set_event_loop(self.loop)
 
-        # Protect concurrent access to the set of active tasks
+        # Protect access to active tasks
         self.active_tasks: set[asyncio.Task] = set()
         self.tasks_lock = asyncio.Lock()
 
-        # Protect route registration and access for receive/send functions
+        # Protect route registration and lookup for receivers and senders
         self.receiver_index: dict[str, Receiver] = {}
-        self.sender_index: dict[str, list[Sender]] = {} # do not use defaultdict(list) because we use .get
+        self.sender_index: dict[str, list[Sender]] = {} # Do not use defaultdict(list) because we rely on .get().
         self.routes_lock = asyncio.Lock()
 
-        # Dynamic routing configuration (can be changed at runtime)
+        # Store routing information that can change at runtime
         self.host: Optional[str] = None
         self.port: Optional[int] = None
-        self._travel = False # Flag to signal intent to travel
-        self._quit = False # Flag to signal intent to shutdown the client
+        self._travel = False # Flag the intent to travel.
+        self._quit = False # Flag the intent to shut down the client.
         self.connection_lock = asyncio.Lock()
 
-        # Safe registration of decorators (hooks, receivers, senders)
+        # Track decorator registration tasks
         self._registration_tasks: list[asyncio.Task] = []
 
-        # One-time indexing of parsed routes
+        # Cache parsed routes
         self.receiver_parsed_routes: dict[str, ParsedRoute] = {}
         self.sender_parsed_routes: dict[str, ParsedRoute] = {}
 
-        # Flow representing the underlying finite state machine
+        # Store the client's flow
         self._flow = Flow()
 
-        # Functions to read and write the flow's active states in memory
+        # Store callbacks that read and write active states
         self._upload_states: Optional[Callable[[Any], Awaitable]] = None
         self._download_states: Optional[Callable[[Any], Awaitable]] = None
 
         self.event_bridge_maxsize = None
-        self.max_concurrent_workers = None # Limit the sending rate (will use 50 if None is given)
+        self.max_concurrent_workers = None # Limit sender concurrency. Uses the configured default when None.
         self.send_queue_maxsize = None
         self.max_bytes_per_line = None
-        self.read_timeout_seconds = None # None is prefered
+        self.read_timeout_seconds = None # Wait indefinitely when None.
         self.retry_delay_seconds = None
         self.batch_drain = None
 
-        # Pass Event information from the receiving end to the sending end
+        # Pass events from receivers to senders
         self.event_bridge: Optional[asyncio.Queue[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]] = None
 
+        # Sender-side orchestration runtime. These structures belong to the
+        # client implementation rather than the protocol layer because they
+        # track local batching, timed admission, and worker handoff state.
         self.send_queue: Optional[asyncio.Queue] = None
+        self.timed_event_buffer: deque[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = deque()
+        self.timed_sender_state: dict[str, TimedSenderRuntime] = {}
+        self.timed_sender_lock = asyncio.Lock()
+        self.timed_sender_wakeup = asyncio.Event()
+        self._next_sender_registration_id = 0
         self.send_workers_started = False  # To avoid double-starting workers
         self.worker_tasks: list[asyncio.Task] = []
         self.writer_lock = asyncio.Lock()
@@ -143,8 +179,8 @@ class SummonerClient:
         self.receiving_hooks: dict[tuple[int,...], Callable[[Union[str, dict]], Union[str, dict]]] = {}
         self.hooks_lock = asyncio.Lock()
 
-        # ─── DNA capture for merging ─────────────────────────────────────────
-        # lists of dicts, each entry records one decorated handler
+        # Store DNA entries for cloning and merging.
+        # Each list records decorated handlers of one kind.
         self._dna_receivers: list[dict] = []
         self._dna_senders:   list[dict] = []
         self._dna_hooks:     list[dict] = []
@@ -152,7 +188,7 @@ class SummonerClient:
         self._dna_upload_states: Optional[dict] = None
         self._dna_download_states: Optional[dict] = None
 
-    # ==== VERSION SPECIFIC ====
+    # ==== CLIENT SETUP ====
 
     def _apply_config(self, config: dict[str,Union[str,dict[str,Union[str,dict]]]]):
 
@@ -200,6 +236,8 @@ class SummonerClient:
     def flow(self) -> Flow:
         return self._flow
     
+    # ==== CLIENT CONTROL ====
+
     async def travel_to(self, host, port):
         async with self.connection_lock:
             self.host = host
@@ -215,6 +253,8 @@ class SummonerClient:
         async with self.connection_lock:
             self._quit = False
             self._travel = False
+
+    # ==== STATE HOOKS ====
 
     def upload_states(self):
         """
@@ -460,6 +500,54 @@ class SummonerClient:
     
     # ==== SENDER REGISTRATION ====
 
+    def _allocate_sender_registration_id(self) -> str:
+        registration_id = f"sender:{self._next_sender_registration_id}"
+        self._next_sender_registration_id += 1
+        return registration_id
+
+    def _normalize_data_mode(self, use_data: bool, data_mode: Optional[str]) -> Optional[str]:
+        if not use_data:
+            return None
+        if data_mode is None:
+            return "live"
+        if data_mode not in {"live", "snapshot"}:
+            raise ValueError(
+                "Argument `data_mode` must be `None`, 'live', or 'snapshot'. "
+                f"Provided: {data_mode!r}"
+            )
+        return data_mode
+
+    def _serialize_run_while_spec(
+            self,
+            run_while: Any,
+        ) -> tuple[str, Optional[bool], Optional[str], Optional[str]]:
+        if run_while is None:
+            return ("none", None, None, None)
+        if isinstance(run_while, bool):
+            return ("bool", run_while, None, None)
+        if callable(run_while):
+            module_name = getattr(run_while, "__module__", None)
+            qualname = getattr(run_while, "__qualname__", None)
+            serialized_name = None
+            source = None
+            if isinstance(module_name, str) and module_name and isinstance(qualname, str) and qualname:
+                serialized_name = f"{module_name}:{qualname}"
+            else:
+                fallback_name = getattr(run_while, "__name__", None)
+                if isinstance(fallback_name, str) and fallback_name:
+                    serialized_name = fallback_name
+            try:
+                source = inspect.getsource(run_while)
+            except Exception:
+                source = getattr(run_while, "__dna_source__", None)
+                if not (isinstance(source, str) and source.strip()):
+                    source = None
+            return ("callable", None, serialized_name, source)
+        raise TypeError(
+            "Argument `run_while` must be `None`, a bool, or a callable returning "
+            f"bool/awaitable bool. Provided: {run_while!r}"
+        )
+
     def send(
             self, 
             route: str, 
@@ -467,6 +555,9 @@ class SummonerClient:
             on_triggers: Optional[set[Signal]] = None,
             on_actions: Optional[set[Type]] = None,
             use_data: bool = False,
+            data_mode: Optional[str] = None,
+            every: Optional[float] = None,
+            run_while: Any = None,
         ):
         if not isinstance(route, str):
             raise TypeError(f"Argument `route` must be string. Provided: {route}")
@@ -513,6 +604,12 @@ class SummonerClient:
             if not isinstance(use_data, bool):
                 raise TypeError(f"Argument `use_data` must be Boolean. Provided: {use_data}")
 
+            if every is not None:
+                if isinstance(every, bool) or not isinstance(every, (int, float)):
+                    raise TypeError(f"Argument `every` must be `None` or a positive number. Provided: {every!r}")
+                if every <= 0:
+                    raise ValueError(f"Argument `every` must be positive. Provided: {every!r}")
+
             if on_triggers is not None and (
                 not isinstance(on_triggers, set) or
                 not all(isinstance(sig, Signal) for sig in on_triggers)
@@ -535,6 +632,21 @@ class SummonerClient:
 
             if use_data and not self._flow.in_use:
                 raise RuntimeError("Argument `use_data=True` requires `client.flow().activate()` before sender registration")
+
+            if every is not None and reactive_filters and not self._flow.in_use:
+                raise RuntimeError(
+                    "Timed reactive senders require `client.flow().activate()` before sender registration"
+                )
+
+            if run_while is not None and every is None:
+                raise ValueError("Argument `run_while` requires `every`")
+
+            if data_mode is not None and not use_data:
+                raise ValueError("Argument `data_mode` requires `use_data=True`")
+
+            normalized_data_mode = self._normalize_data_mode(use_data, data_mode)
+            run_while_kind, run_while_value, run_while_name, run_while_source = self._serialize_run_while_spec(run_while)
+            registration_id = self._allocate_sender_registration_id()
             
             # ----[ DNA capture ]----
             self._dna_senders.append({
@@ -544,13 +656,30 @@ class SummonerClient:
                 "on_triggers": on_triggers,
                 "on_actions": on_actions,
                 "use_data": use_data,
+                "data_mode": normalized_data_mode,
+                "every": every,
+                "run_while": run_while,
+                "run_while_kind": run_while_kind,
+                "run_while_value": run_while_value,
+                "run_while_name": run_while_name,
+                "run_while_source": run_while_source,
                 "source": inspect.getsource(fn),
             })
 
             # ----[ Registration Code ]----
             async def register():
                 
-                sender = Sender(fn=fn, multi=multi, actions=on_actions, triggers=on_triggers, use_data=use_data)
+                sender = Sender(
+                    fn=fn,
+                    multi=multi,
+                    actions=on_actions,
+                    triggers=on_triggers,
+                    use_data=use_data,
+                    data_mode=normalized_data_mode,
+                    every=every,
+                    run_while=run_while,
+                    registration_id=registration_id,
+                )
                 actions_exist = isinstance(on_actions, set) and bool(on_actions)
                 triggers_exist = isinstance(on_triggers, set) and bool(on_triggers)
                 
@@ -588,7 +717,7 @@ class SummonerClient:
 
         return decorator
 
-    # ==== DNA PROCESSING ====
+    # ==== DNA EXPORT ====
 
     def _iter_registered_handler_functions(self):
         """
@@ -619,6 +748,9 @@ class SummonerClient:
             fn = d.get("fn")
             if fn is not None:
                 yield fn
+            run_while = d.get("run_while")
+            if callable(run_while):
+                yield run_while
 
         for d in self._dna_hooks:
             fn = d.get("fn")
@@ -788,6 +920,12 @@ class SummonerClient:
                 "route_key": route_key,     # stable route representative
                 "multi": dna["multi"],
                 "use_data": dna["use_data"],
+                "data_mode": dna["data_mode"],
+                "every": dna["every"],
+                "run_while_kind": dna["run_while_kind"],
+                "run_while_value": dna["run_while_value"],
+                "run_while_name": dna["run_while_name"],
+                "run_while_source": dna.get("run_while_source", None),
                 # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
                 "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
@@ -975,8 +1113,8 @@ class SummonerClient:
         
 
     async def message_receiver_loop(
-            self, 
-            reader: asyncio.StreamReader, 
+            self,
+            reader: asyncio.StreamReader,
             stop_event: asyncio.Event
         ):
         
@@ -1114,7 +1252,7 @@ class SummonerClient:
                         for priority, event_list in sorted(event_buffer.items(), key=lambda kv: kv[0]):
                             for event_data in event_list:
                                 # this will block if the bridge is full, slowing down readers
-                                await self.event_bridge.put((priority,) + event_data)
+                                await self._enqueue_sender_event((priority,) + event_data)
 
                         event_buffer = {}
                     
@@ -1130,6 +1268,204 @@ class SummonerClient:
         except (ServerDisconnected, asyncio.CancelledError):
             stop_event.set()
             raise
+
+    # ==== SEND DATA HELPERS ====
+
+    def _capture_send_data(self, value: Any, data_mode: Optional[str]) -> Any:
+        if data_mode in (None, "live"):
+            return value
+        if data_mode == "snapshot":
+            return copy.deepcopy(value)
+        raise TypeError(f"Unknown data_mode: {data_mode!r}")
+
+    def _materialize_send_data(self, value: Any, data_mode: Optional[str]) -> Any:
+        if data_mode in (None, "live"):
+            return value
+        if data_mode == "snapshot":
+            return copy.deepcopy(value)
+        raise TypeError(f"Unknown data_mode: {data_mode!r}")
+
+    # ==== TIMED SENDER GUARD HELPERS ====
+
+    async def _await_run_while_value(self, awaitable: Any) -> bool:
+        value = await awaitable
+        return bool(value)
+
+    def _wake_timed_scheduler(self, _task: asyncio.Task) -> None:
+        self.timed_sender_wakeup.set()
+
+    def _poll_run_while(self, sender: Sender, runtime: TimedSenderRuntime) -> Optional[bool]:
+        spec = sender.run_while
+
+        if spec is None:
+            return True
+        if isinstance(spec, bool):
+            return spec
+        if not callable(spec):
+            raise TypeError(f"Invalid run_while specification: {spec!r}")
+
+        task = runtime.run_while_task
+        if task is not None:
+            if not task.done():
+                return None
+            runtime.run_while_task = None
+            try:
+                return bool(task.result())
+            except Exception as e:
+                self.logger.warning(f"run_while predicate failed: {type(e).__name__}: {e}")
+                return False
+
+        try:
+            value = spec()
+            if inspect.isawaitable(value):
+                # Async guards may legitimately take time to confirm whether the
+                # sender may proceed. Keep that wait local to this sender by
+                # tracking a dedicated task instead of stalling the whole timed
+                # scheduler.
+                task = self.loop.create_task(self._await_run_while_value(value))
+                task.add_done_callback(self._wake_timed_scheduler)
+                runtime.run_while_task = task
+                return None
+            return bool(value)
+        except Exception as e:
+            self.logger.warning(f"run_while predicate failed: {type(e).__name__}: {e}")
+            return False
+
+    # ==== SEND ROUTING / ORCHESTRATION HELPERS ====
+
+    @staticmethod
+    def _route_accepts(sender_pr: ParsedRoute, receiver_pr: ParsedRoute) -> bool:
+        source_ok = all(any(n.accepts(m) for m in receiver_pr.source) for n in sender_pr.source)
+        label_ok = all(any(n.accepts(m) for m in receiver_pr.label) for n in sender_pr.label)
+        target_ok = all(any(n.accepts(m) for m in receiver_pr.target) for n in sender_pr.target)
+        return source_ok and label_ok and target_ok
+
+    @staticmethod
+    def _has_reactive_filters(sender: Sender) -> bool:
+        return bool(
+            (sender.actions and isinstance(sender.actions, set)) or
+            (sender.triggers and isinstance(sender.triggers, set))
+        )
+
+    async def _snapshot_sender_registry(self) -> tuple[dict[str, list[Sender]], dict[str, ParsedRoute]]:
+        async with self.routes_lock:
+            sender_index = {
+                route: list(routed_senders)
+                for route, routed_senders in self.sender_index.items()
+            }
+            sender_parsed_routes = self.sender_parsed_routes.copy()
+        return sender_index, sender_parsed_routes
+
+    def _drain_pending_events(self) -> list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]:
+        pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = []
+        if not self._flow.in_use:
+            return pending
+
+        try:
+            while True:
+                pending.append(self.event_bridge.get_nowait())
+        except asyncio.QueueEmpty:
+            pass
+
+        pending.sort(key=lambda it: hook_priority_order(it[0]))
+        return pending
+
+    async def _enqueue_sender_event(
+            self,
+            item: tuple[tuple[int, ...], Optional[str], ParsedRoute, Event],
+        ) -> None:
+        await self.event_bridge.put(item)
+
+        if self._flow.in_use:
+            # Timed senders keep their own admission feed so they can be armed
+            # promptly without changing the untimed batch-loop contract.
+            async with self.timed_sender_lock:
+                self.timed_event_buffer.append(item)
+            self.timed_sender_wakeup.set()
+
+    def _make_send_invocation(
+            self,
+            route: str,
+            sender: Sender,
+            *,
+            data: Any = None,
+            track_completion: bool = False,
+        ) -> SendInvocation:
+        done = self.loop.create_future() if track_completion else None
+        return SendInvocation(route=route, sender=sender, data=data, done=done)
+
+    async def _wait_for_send_invocations(self, invocations: list[SendInvocation]) -> None:
+        tracked = [
+            invocation.done
+            for invocation in invocations
+            if invocation.done is not None
+        ]
+        if tracked:
+            await asyncio.gather(*tracked, return_exceptions=True)
+
+    def _ensure_timed_runtime(self, sender: Sender) -> TimedSenderRuntime:
+        registration_id = sender.registration_id or sender.fn.__name__
+        runtime = self.timed_sender_state.get(registration_id)
+        if runtime is None:
+            runtime = TimedSenderRuntime()
+            self.timed_sender_state[registration_id] = runtime
+        return runtime
+
+    def _arm_timed_senders_from_pending_locked(
+            self,
+            sender_index: dict[str, list[Sender]],
+            sender_parsed_routes: dict[str, ParsedRoute],
+            pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]],
+            now: float,
+        ) -> None:
+        if not pending:
+            return
+
+        for route, routed_senders in sender_index.items():
+            sender_parsed_route = sender_parsed_routes.get(route)
+            if sender_parsed_route is None:
+                continue
+
+            for sender in routed_senders:
+                if sender.every is None or (not self._has_reactive_filters(sender)):
+                    continue
+
+                runtime = self._ensure_timed_runtime(sender)
+
+                for (_priority, _key, parsed_route, event) in pending:
+                    if not (
+                        self._route_accepts(sender_parsed_route, parsed_route)
+                        and sender.responds_to(event)
+                    ):
+                        continue
+
+                    if not runtime.armed:
+                        runtime.armed = True
+                        runtime.running = True
+                        runtime.next_run_at = now
+
+                    if sender.use_data:
+                        try:
+                            runtime.pending_payloads.append(
+                                self._capture_send_data(event.data, sender.data_mode)
+                            )
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Failed to capture timed sender data for '{sender.fn.__name__}' "
+                                f"on route '{route}': {type(e).__name__}: {e}"
+                            )
+                    else:
+                        break
+
+    async def _wait_for_timed_wakeup(self, timeout: float) -> None:
+        if timeout <= 0:
+            return
+        try:
+            await asyncio.wait_for(self.timed_sender_wakeup.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return
+        finally:
+            self.timed_sender_wakeup.clear()
 
     # ==== SENDER EXECUTION ====
 
@@ -1153,12 +1489,20 @@ class SummonerClient:
 
         while True:
             
-            item: Optional[tuple[str, Sender, Any]] = await self.send_queue.get()
+            item = await self.send_queue.get()
             if item is None:
                 self.send_queue.task_done()
                 break
-            
-            route, sender, sender_data = item
+
+            invocation_done = None
+            if isinstance(item, SendInvocation):
+                route = item.route
+                sender = item.sender
+                sender_data = item.data
+                invocation_done = item.done
+            else:
+                route, sender, sender_data = item
+
             try:
                 if sender.use_data:
                     result = await sender.fn(sender_data)
@@ -1168,6 +1512,8 @@ class SummonerClient:
                 # ----[ Urgent: Handle Aborts ]----
                 async with self.connection_lock:
                     if self._quit:
+                        if invocation_done is not None and not invocation_done.done():
+                            invocation_done.set_result(None)
                         stop_event.set()
                         break
 
@@ -1219,11 +1565,14 @@ class SummonerClient:
                     # ----[ Unpack: Post Messages ]----
                     async with self.writer_lock:
                         writer.write(message)
-                
+
                 # No concurrency on batch_drain (initialized in run())
                 if not self.batch_drain:
                     async with self.writer_lock:
                         await writer.drain()
+
+                if invocation_done is not None and not invocation_done.done():
+                    invocation_done.set_result(None)
 
             except Exception as e:
                 consecutive_errors += 1
@@ -1231,6 +1580,8 @@ class SummonerClient:
                     f"Worker for {sender.fn.__name__} crashed ({consecutive_errors} in a row): {e}",
                     exc_info=True
                 )
+                if invocation_done is not None and not invocation_done.done():
+                    invocation_done.set_result(e)
                 # if 3 workers in a row have crashed, abort the session
                 if consecutive_errors >= self.max_consecutive_worker_errors:
                     self.logger.critical(f"{self.max_consecutive_worker_errors} consecutive worker failures; shutting down sender loop")
@@ -1248,131 +1599,327 @@ class SummonerClient:
         self.worker_tasks.clear()
         self.send_workers_started = False
 
-    async def message_sender_loop(
-            self, 
-            writer: asyncio.StreamWriter, 
-            stop_event: asyncio.Event
-        ):
+    async def _message_sender_batch_loop(
+            self,
+            writer: asyncio.StreamWriter,
+            stop_event: asyncio.Event,
+        ) -> None:
+        """
+        Preserve the legacy sender contract for untimed senders.
 
-        # ----[ Helper: Matches Routes Between Senders and Receivers to Trigger Send ]----
-        def _route_accepts(
-                sender_pr: ParsedRoute, 
-                receiver_pr: ParsedRoute
-            ) -> bool:
-            source_ok   = all(any(n.accepts(m)  for m in receiver_pr.source)     for n in sender_pr.source)
-            label_ok    = all(any(n.accepts(m)  for m in receiver_pr.label)      for n in sender_pr.label)
-            target_ok   = all(any(n.accepts(m)  for m in receiver_pr.target)     for n in sender_pr.target)
-            return source_ok and label_ok and target_ok
+        Untimed senders remain round-based: each loop pass collects the current
+        work, dispatches a batch, and waits for that batch to finish before
+        starting the next untimed round. This keeps pre-`every` behavior stable.
+        """
+        while not stop_event.is_set():
+            sender_index, sender_parsed_routes = await self._snapshot_sender_registry()
+            pending = self._drain_pending_events()
 
-        cancelled = False
-        try:
+            invocations: list[SendInvocation] = []
+            emitted: set[tuple[str, Optional[str], str]] = set()
 
-            # ----[ Keep Sending While Actively Listening (No Travel) ]----
-            while not stop_event.is_set():
-                
-                # ----[ Prepare Sender Batch ]----
-                    
-                async with self.routes_lock:
-                    sender_index: dict[str, list[Sender]] = self.sender_index.copy()
+            for route, routed_senders in sender_index.items():
+                for sender in routed_senders:
+                    if sender.every is not None:
+                        continue
 
-                # ----[ Fast upload of pending event data ]----
-                if self._flow.in_use:
-                    
-                    async with self.routes_lock:
-                        sender_parsed_routes: dict[str, ParsedRoute] = self.sender_parsed_routes.copy()
-                    
-                    pending: list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]] = []
-                    try:
-                        while True:
-                            pending.append(self.event_bridge.get_nowait())
-                    except asyncio.QueueEmpty:
-                        pass
-                    
-                    pending.sort(key=lambda it: hook_priority_order(it[0]))
+                    sender_is_reactive = self._has_reactive_filters(sender)
 
-                # ----[ Build Sender Batch ]---- 
-                senders: list[tuple[str, Sender, Any]] = []
+                    if (not self._flow.in_use) or (not sender_is_reactive):
+                        if sender.use_data:
+                            self.logger.warning(
+                                f"Skipping sender '{sender.fn.__name__}' on route '{route}': "
+                                "use_data=True requires a reactive sender running with flow enabled"
+                            )
+                            continue
+                        invocations.append(
+                            self._make_send_invocation(
+                                route,
+                                sender,
+                                track_completion=True,
+                            )
+                        )
+                        continue
 
-                # De-dup set: at most one sender per (route, key-from-recv, recv-handler-name) this cycle.
-                # `use_data=True` senders intentionally bypass this so each queued event payload is delivered.
-                emitted: set[tuple[str, Optional[str], str]] = set()
+                    sender_parsed_route = sender_parsed_routes.get(route)
+                    if sender_parsed_route is None:
+                        continue
+
+                    for (_priority, key, parsed_route, event) in pending:
+                        if not (
+                            self._route_accepts(sender_parsed_route, parsed_route)
+                            and sender.responds_to(event)
+                        ):
+                            continue
+
+                        if sender.use_data:
+                            try:
+                                captured_data = self._capture_send_data(event.data, sender.data_mode)
+                                invocations.append(
+                                    self._make_send_invocation(
+                                        route,
+                                        sender,
+                                        data=self._materialize_send_data(captured_data, sender.data_mode),
+                                        track_completion=True,
+                                    )
+                                )
+                            except Exception as e:
+                                self.logger.warning(
+                                    f"Failed to prepare sender data for '{sender.fn.__name__}' "
+                                    f"on route '{route}': {type(e).__name__}: {e}"
+                                )
+                            continue
+
+                        dedup_key = (route, key, sender.fn.__name__)
+                        if dedup_key not in emitted:
+                            invocations.append(
+                                self._make_send_invocation(
+                                    route,
+                                    sender,
+                                    track_completion=True,
+                                )
+                            )
+                            emitted.add(dedup_key)
+                        break
+
+            if not invocations:
+                await asyncio.sleep(0.1)
+                continue
+
+            queue_size = self.send_queue.qsize()
+            expected_queue_size = queue_size + len(invocations)
+            if expected_queue_size > self.send_queue_maxsize * 0.8:
+                self.logger.warning(
+                    f"Queue is about to exceed 80% its capacity; "
+                    f"Attempted load size: {expected_queue_size} out of {self.send_queue_maxsize}"
+                )
+
+            try:
+                for invocation in invocations:
+                    await self.send_queue.put(invocation)
+            except asyncio.CancelledError:
+                self.logger.info("Sender enqueue loop cancelled mid-batch.")
+                raise
+
+            await self._wait_for_send_invocations(invocations)
+
+            if self.batch_drain:
+                async with self.writer_lock:
+                    await writer.drain()
+
+            async with self.connection_lock:
+                if self._travel or self._quit:
+                    stop_event.set()
+
+    async def _message_sender_timed_loop(
+            self,
+            writer: asyncio.StreamWriter,
+            stop_event: asyncio.Event,
+        ) -> None:
+        """
+        Timed senders become scheduler-owned obligations after admission.
+
+        Philosophy:
+        - The initial event is admission. It arms a timed sender when the system
+          can accept the work.
+        - Once armed, `every` creates an obligation: the scheduler should keep
+          servicing that sender on cadence without being blocked by unrelated
+          untimed batches.
+
+        This loop intentionally owns only timed senders so legacy untimed
+        behavior stays round-based and unchanged.
+        """
+        while not stop_event.is_set():
+            sender_index, sender_parsed_routes = await self._snapshot_sender_registry()
+            invocations: list[SendInvocation] = []
+            next_due_times: list[float] = []
+            drain_needed = False
+            admission_now = self.loop.time()
+
+            async with self.timed_sender_lock:
+                buffered_events = list(self.timed_event_buffer)
+                self.timed_event_buffer.clear()
+                if buffered_events:
+                    self._arm_timed_senders_from_pending_locked(
+                        sender_index,
+                        sender_parsed_routes,
+                        buffered_events,
+                        admission_now,
+                    )
 
                 for route, routed_senders in sender_index.items():
                     for sender in routed_senders:
-                        
-                        # Non-reactive (no actions/triggers): preserve current behavior
-                        if (not self._flow.in_use) or (sender.actions is None and sender.triggers is None):
-                            if sender.use_data:
-                                self.logger.warning(
-                                    f"Skipping sender '{sender.fn.__name__}' on route '{route}': "
-                                    "use_data=True requires a reactive sender running with flow enabled"
+                        if sender.every is None:
+                            continue
+
+                        sender_is_reactive = self._has_reactive_filters(sender)
+                        runtime = self._ensure_timed_runtime(sender)
+
+                        if runtime.in_flight_done is not None:
+                            if runtime.in_flight_done.done():
+                                runtime.in_flight_done = None
+                                drain_needed = True
+                            else:
+                                if runtime.next_run_at is not None:
+                                    next_due_times.append(runtime.next_run_at)
+                                continue
+
+                        if sender_is_reactive and not runtime.armed:
+                            continue
+                        run_while_allowed = self._poll_run_while(sender, runtime)
+                        if run_while_allowed is None:
+                            continue
+
+                        if not run_while_allowed:
+                            if sender_is_reactive:
+                                runtime.armed = False
+                                runtime.running = False
+                                runtime.pending_payloads.clear()
+                                runtime.next_run_at = None
+                                runtime.in_flight_done = None
+                                if runtime.run_while_task is not None:
+                                    runtime.run_while_task.cancel()
+                                    runtime.run_while_task = None
+                            else:
+                                runtime.running = False
+                            continue
+
+                        now = self.loop.time()
+                        runtime.running = True
+
+                        if runtime.next_run_at is None:
+                            runtime.next_run_at = now
+
+                        if now < runtime.next_run_at:
+                            next_due_times.append(runtime.next_run_at)
+                            continue
+
+                        timed_batch: list[SendInvocation] = []
+
+                        if sender.use_data:
+                            buffered_payloads = list(runtime.pending_payloads)
+                            runtime.pending_payloads.clear()
+
+                            for buffered_payload in buffered_payloads:
+                                try:
+                                    payload = self._materialize_send_data(buffered_payload, sender.data_mode)
+                                except Exception as e:
+                                    self.logger.warning(
+                                        f"Failed to materialize timed sender data for '{sender.fn.__name__}' "
+                                        f"on route '{route}': {type(e).__name__}: {e}"
+                                    )
+                                    continue
+
+                                timed_batch.append(
+                                    self._make_send_invocation(
+                                        route,
+                                        sender,
+                                        data=payload,
+                                        track_completion=True,
+                                    )
                                 )
-                                continue
-                            senders.append((route, sender, None))
-                        
-                        # Reactive: require matching a pending activation (existential)
-                        elif self._flow.in_use and ((sender.actions and isinstance(sender.actions, set)) or 
-                                   (sender.triggers and isinstance(sender.triggers, set))):
-                            
-                            sender_parsed_route = sender_parsed_routes.get(route)
-                            if sender_parsed_route is None:
-                                continue
-                            
-                            # Iterate pending in queue order.
-                            # `use_data=True` senders receive one call per matching queued event.
-                            # Other reactive senders keep the existing first-match de-dup behavior.
-                            for (_priority, key, parsed_route, event) in pending:
-                                if _route_accepts(sender_parsed_route, parsed_route) and sender.responds_to(event):
-                                    if sender.use_data:
-                                        senders.append((route, sender, event.data))
-                                        continue
+                        else:
+                            timed_batch.append(
+                                self._make_send_invocation(
+                                    route,
+                                    sender,
+                                    track_completion=True,
+                                )
+                            )
 
-                                    dedup_key = (route, key, sender.fn.__name__)  # key scopes to the activation thread/peer
-                                    if dedup_key not in emitted:
-                                        senders.append((route, sender, None))
-                                        emitted.add(dedup_key)
-                                    break  # do not enqueue multiple times for this sender this cycle
-                                    
-                # ----[ Empty: Skip and Prevent Client Overwhelming | Almost full: warning ]----
-                if not senders:
-                    await asyncio.sleep(0.1) # Time
-                    continue
-                else:
-                    queue_size = self.send_queue.qsize()
-                    expected_queue_size = queue_size + len(senders)
-                    if expected_queue_size > self.send_queue_maxsize * 0.8:  # 80% full
-                        self.logger.warning(f"Queue is about to exceed 80% its capacity; Attempted load size: {expected_queue_size} out of {self.send_queue_maxsize}")
+                        if timed_batch:
+                            runtime.in_flight_done = asyncio.gather(
+                                *[
+                                    invocation.done
+                                    for invocation in timed_batch
+                                    if invocation.done is not None
+                                ],
+                                return_exceptions=True,
+                            )
+                            invocations.extend(timed_batch)
+                        else:
+                            runtime.in_flight_done = None
 
-                # ----[ Enqueue Sender Batch | Senders Are Run in Background ]----
+                        runtime.next_run_at = now + float(sender.every)
+                        next_due_times.append(runtime.next_run_at)
+
+            if drain_needed and self.batch_drain:
+                async with self.writer_lock:
+                    await writer.drain()
+
+            if invocations:
+                queue_size = self.send_queue.qsize()
+                expected_queue_size = queue_size + len(invocations)
+                if expected_queue_size > self.send_queue_maxsize * 0.8:
+                    self.logger.warning(
+                        f"Queue is about to exceed 80% its capacity; "
+                        f"Attempted load size: {expected_queue_size} out of {self.send_queue_maxsize}"
+                    )
+
                 try:
-                    for sender in senders:
-                        await self.send_queue.put(sender)  # Will block if full (i.e., back-pressure)
+                    for invocation in invocations:
+                        await self.send_queue.put(invocation)
                 except asyncio.CancelledError:
-                    self.logger.info("Sender enqueue loop cancelled mid-batch.")
+                    self.logger.info("Timed sender enqueue loop cancelled mid-batch.")
                     raise
 
-                # ----[ Wait for Sender Batch to Finish]----
-                await self.send_queue.join()
+            sleep_for = 0.1
+            if next_due_times:
+                next_due_at = min(next_due_times)
+                sleep_for = max(0.0, min(0.1, next_due_at - self.loop.time()))
+            await self._wait_for_timed_wakeup(sleep_for)
 
-                if self.batch_drain:
-                    async with self.writer_lock:
-                        await writer.drain()
+            async with self.connection_lock:
+                if self._travel or self._quit:
+                    stop_event.set()
 
-                # ----[ Quit or Travel ]----
-                async with self.connection_lock:
-                    if self._travel or self._quit:
-                        stop_event.set()
+    async def message_sender_loop(
+            self,
+            writer: asyncio.StreamWriter,
+            stop_event: asyncio.Event
+        ):
+        cancelled = False
+        batch_task: Optional[asyncio.Task] = None
+        timed_task: Optional[asyncio.Task] = None
+
+        try:
+            self.timed_sender_wakeup.clear()
+            batch_task = self.loop.create_task(self._message_sender_batch_loop(writer, stop_event))
+            timed_task = self.loop.create_task(self._message_sender_timed_loop(writer, stop_event))
+            await asyncio.gather(batch_task, timed_task)
 
         except asyncio.CancelledError:
             self.logger.info("Client about to disconnect...")
             cancelled = True
-            # do NOT re-raise yet; let finally run first
+            raise
 
         finally:
-            # Best-effort signal to workers; never block on shutdown
+            stop_event.set()
+            self.timed_sender_wakeup.set()
+
+            tasks_to_finish = [
+                task for task in (batch_task, timed_task)
+                if task is not None
+            ]
+            for task in tasks_to_finish:
+                if not task.done():
+                    task.cancel()
+            if tasks_to_finish:
+                await asyncio.gather(*tasks_to_finish, return_exceptions=True)
+
+            async with self.timed_sender_lock:
+                for runtime in self.timed_sender_state.values():
+                    if runtime.run_while_task is not None and not runtime.run_while_task.done():
+                        runtime.run_while_task.cancel()
+                pending_run_while = [
+                    runtime.run_while_task
+                    for runtime in self.timed_sender_state.values()
+                    if runtime.run_while_task is not None
+                ]
+            if pending_run_while:
+                await asyncio.gather(*pending_run_while, return_exceptions=True)
+
             if self.send_queue is not None:
-                # This may result in redundant cancellation if shutdown() is also called,
-                # but guarantees all workers get signaled even in abrupt exits.
                 for _ in range(self.max_concurrent_workers):
                     try:
                         if cancelled:
@@ -1385,7 +1932,7 @@ class SummonerClient:
                         # swallow during shutdown
                         break
 
-    # ==== HANDLE BOTH SENDING AND RECEIVING ENDS ====
+    # ==== SESSION HANDLING ====
 
     async def handle_session(self, host: str = '127.0.0.1', port: int = 8888):
         """
@@ -1401,6 +1948,7 @@ class SummonerClient:
             await self._cleanup_workers()
             self.send_queue = asyncio.Queue(maxsize=self.send_queue_maxsize)
             self.event_bridge = asyncio.Queue(maxsize = self.event_bridge_maxsize)
+            self.timed_sender_state.clear()
 
             # reset any previous travel/quit intent so each session starts fresh;
             # travel is only honored if set after this point, quit likewise
@@ -1472,6 +2020,7 @@ class SummonerClient:
                 
                 # Clean up worker used in the sender loop
                 await self._cleanup_workers()
+                self.timed_sender_state.clear()
 
                 # Deregister this session and its children from active tasks
                 async with self.tasks_lock:
@@ -1491,17 +2040,13 @@ class SummonerClient:
             task.cancel()
             
     def set_termination_signals(self):
-        """
-        Install SIGINT/SIGTERM handlers onto the loop:
-            - SIGINT: interupt signal for Ctrl+C | value = 2
-            - SIGTERM: system/process-based termination | value = 15
-        """
+        """Install SIGINT and SIGTERM handlers on the event loop."""
         if platform.system() != "Windows":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 self.loop.add_signal_handler(sig, self.shutdown)
         else:
             def _handler(sig, frame):
-                # thread-safe: schedule shutdown on the event loop
+                # Schedule shutdown on the event loop in a thread-safe way.
                 try:
                     self.loop.call_soon_threadsafe(self.shutdown)
                 except RuntimeError:
