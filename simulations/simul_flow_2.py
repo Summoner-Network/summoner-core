@@ -238,7 +238,8 @@ for route in test_routes:
             fn=generate_sender_fn(route_str, actions, triggers),
             multi=False,
             actions=actions,
-            triggers=triggers
+            triggers=triggers,
+            use_data=False,
             )
     sender_index.setdefault(route_str, [])
     sender_index[route_str].append(sender)
@@ -341,5 +342,4 @@ async def sender_test():
 
 # run the simulation
 asyncio.run(sender_test())
-
 

@@ -304,13 +304,50 @@ class ParsedRoute:
 
 # ======= PROTOCOL: SEND / RECEIVE =======
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Sender:
-    __slots__ = ('fn', 'multi', 'actions', 'triggers')
-    fn: Callable[[], Awaitable]
+    __slots__ = (
+        'fn',
+        'multi',
+        'actions',
+        'triggers',
+        'use_data',
+        'data_mode',
+        'every',
+        'run_while',
+        'registration_id',
+    )
+    fn: Callable[..., Awaitable]
     multi: bool
     actions: Optional[set[Type]]
     triggers: Optional[set[Signal]]
+    use_data: bool
+    data_mode: Optional[str]
+    every: Optional[float]
+    run_while: Any
+    registration_id: Optional[str]
+
+    def __init__(
+            self,
+            fn: Callable[..., Awaitable],
+            multi: bool,
+            actions: Optional[set[Type]],
+            triggers: Optional[set[Signal]],
+            use_data: bool = False,
+            data_mode: Optional[str] = None,
+            every: Optional[float] = None,
+            run_while: Any = None,
+            registration_id: Optional[str] = None,
+        ):
+        object.__setattr__(self, "fn", fn)
+        object.__setattr__(self, "multi", multi)
+        object.__setattr__(self, "actions", actions)
+        object.__setattr__(self, "triggers", triggers)
+        object.__setattr__(self, "use_data", use_data)
+        object.__setattr__(self, "data_mode", data_mode)
+        object.__setattr__(self, "every", every)
+        object.__setattr__(self, "run_while", run_while)
+        object.__setattr__(self, "registration_id", registration_id)
 
     def responds_to(self, event: Any) -> bool:
         action_check = True
@@ -522,4 +559,3 @@ class ClientIntent(Enum):
     QUIT      = auto()   # brutal, immediate exit
     TRAVEL    = auto()   # switch to a new host/port
     ABORT  = auto()   # abort due to error
-
