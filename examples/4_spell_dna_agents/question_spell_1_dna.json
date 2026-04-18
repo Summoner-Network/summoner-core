@@ -33,6 +33,7 @@
   {
     "type": "receive",
     "route": "spell --> effect",
+    "route_key": "spell--[]-->effect",
     "priority": [],
     "source": "@agent.receive(route=\"spell --> effect\")\nasync def custom_receive(msg: Union[dict,str]) -> None:\n    global is_back\n    msg = (msg[\"content\"] if isinstance(msg, dict) and \"content\" in msg else msg) \n    tag = (\"\\r[From server]\" if isinstance(msg, str) and msg[:len(\"Warning:\")] == \"Warning:\" else \"\\r[Received]\")\n    print(tag, msg, flush=True)\n    if msg == \"/travel\":\n        await agent.travel_to(host = \"testnet.summoner.org\", port = 8888)\n        is_back = True\n        return Move(Trigger.ok)\n    elif msg == \"/quit\":\n        await agent.quit()\n        return None\n    elif msg == \"/go_home\":\n        await agent.travel_to(host = agent.default_host, port = agent.default_port)\n        is_back = True\n        return None\n    print(\"waiting for instructions... \", flush=True)\n",
     "module": "__main__",
@@ -41,7 +42,9 @@
   {
     "type": "send",
     "route": "spell",
+    "route_key": "spell",
     "multi": false,
+    "use_data": false,
     "on_triggers": [],
     "on_actions": [],
     "source": "@agent.send(route=\"spell\")\nasync def send_question() -> str:\n    global is_back\n    if is_back and agent.host == agent.default_host and agent.port == agent.default_port:\n        is_back = False\n        return \"I am back\"\n    else:\n        await asyncio.sleep(0.1)\n",

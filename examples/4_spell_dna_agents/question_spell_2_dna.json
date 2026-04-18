@@ -41,6 +41,7 @@
   {
     "type": "receive",
     "route": "effect --> spell",
+    "route_key": "effect--[]-->spell",
     "priority": [],
     "source": "@agent.receive(route=\"effect --> spell\")\nasync def receive_response(msg: Union[str, dict]) -> None:\n    global tracker\n    content = msg[\"content\"] if isinstance(msg, dict) else msg\n    print(f\"Received[{tracker}]: {content}\")\n    if content != \"waiting\":\n        async with tracker_lock:\n            if tracker >= 6:\n                await agent.travel_to(host = agent.default_host, port = agent.default_port)\n                tracker = 0\n                return Move(Trigger.ok)\n            else:\n                tracker += 1\n",
     "module": "__main__",
@@ -49,7 +50,9 @@
   {
     "type": "send",
     "route": "effect",
+    "route_key": "effect",
     "multi": false,
+    "use_data": false,
     "on_triggers": [],
     "on_actions": [],
     "source": "@agent.send(route=\"effect\")\nasync def send_question() -> str:\n    global tracker\n    await asyncio.sleep(2)\n    async with tracker_lock:\n        return QUESTIONS[tracker % len(QUESTIONS)]\n",

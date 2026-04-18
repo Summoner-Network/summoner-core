@@ -51,20 +51,23 @@ def _check_param_and_return(fn,
                             decorator_name: str,
                             allow_param: tuple[type, ...],
                             allow_return: tuple[type, ...],
-                            logger: Logger):
+                            logger: Logger,
+                            expected_params: Union[int, None] = None,
+                            skip_param_type_check: bool = False):
     sig = inspect.signature(fn)
     hints = get_type_hints(fn)
 
     # parameter check
     params = list(sig.parameters.values())
 
-    expected_params = 1 if decorator_name in ("@hook", "@receive", "@upload_states", "@download_states") else 0
+    if expected_params is None:
+        expected_params = 1 if decorator_name in ("@hook", "@receive", "@upload_states", "@download_states") else 0
     
     if len(params) != expected_params:
         raise TypeError(f"{decorator_name} '{fn.__name__}' must have "
                         f"{expected_params} parameter(s), not {len(params)}")
 
-    if expected_params == 1:
+    if expected_params == 1 and not skip_param_type_check:
         raw_param = params[0].annotation
         param_hint = _normalize_annotation(raw_param) or hints.get(params[0].name, None)
         if param_hint is None:

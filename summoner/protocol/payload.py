@@ -153,12 +153,13 @@ def cast_v0_0_1(val: Any, expected: Any) -> Any:
     return val
 
 
-# Register version 0.0.1
+# Register all versions since 0.0.1
 register_envelope_version("0.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.0", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.0.1", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version("1.1.0", parse_v0_0_1, cast_v0_0_1)
-# register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
+register_envelope_version("1.1.1", parse_v0_0_1, cast_v0_0_1)
+# register_envelope_version("1.2.0", parse_v0_0_1, cast_v0_0_1)
 register_envelope_version(core_version, parse_v0_0_1, cast_v0_0_1)
 
 
@@ -227,9 +228,12 @@ def recover_with_types(text: str) -> RelayedMessage:
       3. Returns a dict: {"remote_addr": <sender>, "content": <typed_payload>}.
 
     Fallbacks (in order):
-      - Invalid JSON or non-JSON warning strings: strip trailing newline and return raw string.
-      - Missing outer keys ("remote_addr"/"content"): strip newline and return raw string.
-      - Missing envelope keys inside content: return the parsed `{"remote_addr":…, "content":…}` as-is.
+      - Invalid JSON or non-JSON warning strings: strip a trailing newline and return the raw string.
+      - Plain JSON strings that are not transport envelopes: strip a trailing newline and return the parsed string.
+      - Parsed JSON values that are not Summoner relay wrappers
+        (missing outer "remote_addr"/"content"): return the parsed value as-is.
+      - Summoner relay wrappers whose `content` is not a typed envelope:
+        return the parsed `{"remote_addr": ..., "content": ...}` object as-is.
 
     Args:
         text: Raw text received from the server (may include newline).
@@ -247,6 +251,9 @@ def recover_with_types(text: str) -> RelayedMessage:
     except (ValueError, JSONDecodeError):
         # If that fails (e.g. pure warning string), strip newline and relay the raw text
         return remove_last_newline(text)
+
+    if isinstance(obj, str):
+        return remove_last_newline(obj)
 
     # 2) Ensure we have the outer {"remote_addr":…, "content":…} wrapper
     if not (isinstance(obj, dict) and "remote_addr" in obj and "content" in obj):
