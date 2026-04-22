@@ -15,13 +15,13 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "aioconsole==0.8.1",
-        "python-dotenv==1.1.0",
+        "python-dotenv~=1.2.2",
         "typing_extensions==4.15.0; python_version < '3.13'",
     ],
     extras_require={
         "dev": [
             "maturin>=1.8",
-            "pytest>=8.3.0",
+            "pytest~=9.0.3",
             "black",
             "ruff",
         ]
