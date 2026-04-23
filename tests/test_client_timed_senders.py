@@ -250,6 +250,68 @@ def test_reactive_timed_use_data_buffers_multiple_payloads_for_same_tick():
         client.loop.close()
 
 
+def test_reactive_timed_when_data_filters_buffered_payloads():
+    client = SummonerClient("timed-reactive-when-data")
+    client.flow().activate()
+    Trigger = load_triggers(json_dict={"go": None})
+    writer = DummyWriter()
+    stop_event = asyncio.Event()
+    seen: list[int] = []
+
+    try:
+        @client.hook(Direction.SEND, priority=(1,))
+        async def stop_after_kept_payload(payload: dict) -> dict:
+            if payload["id"] == 2:
+                await client.quit()
+            return payload
+
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            on_triggers={Trigger.go},
+            use_data=True,
+            data_mode="snapshot",
+            when_data=lambda data: data["id"] % 2 == 0,
+            every=0.01,
+            run_while=True,
+        )
+        async def timed_sender(data: dict) -> dict:
+            seen.append(data["id"])
+            return {"id": data["id"]}
+
+        client.loop.run_until_complete(client._wait_for_registration())
+
+        client.max_concurrent_workers = 1
+        client.send_queue_maxsize = 8
+        client.event_bridge_maxsize = 8
+        client.max_consecutive_worker_errors = 3
+        client.batch_drain = True
+        client.send_queue = asyncio.Queue(maxsize=client.send_queue_maxsize)
+        client.event_bridge = asyncio.Queue(maxsize=client.event_bridge_maxsize)
+
+        parsed_route = client.flow().parse_route("request")
+        client.loop.run_until_complete(
+            client._enqueue_sender_event(
+                ((1,), "tape:peer-a", parsed_route, Action.STAY(Trigger.go, data={"id": 1}))
+            )
+        )
+        client.loop.run_until_complete(
+            client._enqueue_sender_event(
+                ((1,), "tape:peer-a", parsed_route, Action.STAY(Trigger.go, data={"id": 2}))
+            )
+        )
+
+        client._start_send_workers(writer, stop_event)
+        client.loop.run_until_complete(client.message_sender_loop(writer, stop_event))
+        client.loop.run_until_complete(client._cleanup_workers())
+
+        assert stop_event.is_set()
+        assert seen == [2]
+        assert len(writer.messages) == 1
+    finally:
+        client.loop.close()
+
+
 def test_reactive_timed_multi_use_data_on_triggers_only_emits_all_payloads():
     client = SummonerClient("timed-reactive-multi-data")
     client.flow().activate()

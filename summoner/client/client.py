@@ -142,6 +142,8 @@ class SummonerClient:
         # Cache parsed routes
         self.receiver_parsed_routes: dict[str, ParsedRoute] = {}
         self.sender_parsed_routes: dict[str, ParsedRoute] = {}
+        self.snapshot_capture_sender_index: dict[str, list[Sender]] = {}
+        self.snapshot_capture_sender_parsed_routes: dict[str, ParsedRoute] = {}
 
         # Store the client's flow
         self._flow = Flow()
@@ -514,39 +516,109 @@ class SummonerClient:
             raise ValueError(
                 "Argument `data_mode` must be `None`, 'live', or 'snapshot'. "
                 f"Provided: {data_mode!r}"
-            )
+        )
         return data_mode
 
-    def _serialize_run_while_spec(
+    def _serialize_callable_spec(
             self,
-            run_while: Any,
+            spec_name: str,
+            spec: Any,
+            *,
+            allow_bool: bool = False,
         ) -> tuple[str, Optional[bool], Optional[str], Optional[str]]:
-        if run_while is None:
+        if spec is None:
             return ("none", None, None, None)
-        if isinstance(run_while, bool):
-            return ("bool", run_while, None, None)
-        if callable(run_while):
-            module_name = getattr(run_while, "__module__", None)
-            qualname = getattr(run_while, "__qualname__", None)
+        if allow_bool and isinstance(spec, bool):
+            return ("bool", spec, None, None)
+        if callable(spec):
+            module_name = getattr(spec, "__module__", None)
+            qualname = getattr(spec, "__qualname__", None)
             serialized_name = None
             source = None
             if isinstance(module_name, str) and module_name and isinstance(qualname, str) and qualname:
                 serialized_name = f"{module_name}:{qualname}"
             else:
-                fallback_name = getattr(run_while, "__name__", None)
+                fallback_name = getattr(spec, "__name__", None)
                 if isinstance(fallback_name, str) and fallback_name:
                     serialized_name = fallback_name
             try:
-                source = inspect.getsource(run_while)
+                source = inspect.getsource(spec)
             except Exception:
-                source = getattr(run_while, "__dna_source__", None)
+                source = getattr(spec, "__dna_source__", None)
                 if not (isinstance(source, str) and source.strip()):
                     source = None
             return ("callable", None, serialized_name, source)
+        if allow_bool:
+            allowed = "`None`, a bool, or a callable"
+        else:
+            allowed = "`None` or a callable"
         raise TypeError(
-            "Argument `run_while` must be `None`, a bool, or a callable returning "
-            f"bool/awaitable bool. Provided: {run_while!r}"
+            f"Argument `{spec_name}` must be {allowed}. Provided: {spec!r}"
         )
+
+    def _is_async_callable(self, fn: Any) -> bool:
+        if inspect.iscoroutinefunction(fn):
+            return True
+        call = getattr(fn, "__call__", None)
+        return inspect.iscoroutinefunction(call)
+
+    def _validate_callable_accepts_positional_args(
+            self,
+            spec_name: str,
+            fn: Callable[..., Any],
+            arg_count: int,
+        ) -> None:
+        try:
+            signature = inspect.signature(fn)
+        except (TypeError, ValueError):
+            return
+
+        probe_args = [object()] * arg_count
+        try:
+            signature.bind(*probe_args)
+        except TypeError as e:
+            raise TypeError(
+                f"Argument `{spec_name}` callable must accept {arg_count} positional "
+                f"argument(s). Provided: {fn!r}"
+            ) from e
+
+    def _serialize_run_while_spec(
+            self,
+            run_while: Any,
+        ) -> tuple[str, Optional[bool], Optional[str], Optional[str]]:
+        return self._serialize_callable_spec(
+            "run_while",
+            run_while,
+            allow_bool=True,
+        )
+
+    def _serialize_when_data_spec(
+            self,
+            when_data: Any,
+        ) -> tuple[str, Optional[bool], Optional[str], Optional[str]]:
+        return self._serialize_callable_spec("when_data", when_data)
+
+    def _validate_when_data_spec(
+            self,
+            when_data: Any,
+            *,
+            use_data: bool,
+        ) -> None:
+        if when_data is None:
+            return
+        if not use_data:
+            raise ValueError("Argument `when_data` requires `use_data=True`")
+        if not callable(when_data):
+            raise TypeError(
+                "Argument `when_data` must be `None` or a callable receiving the "
+                f"sender payload. Provided: {when_data!r}"
+            )
+        if self._is_async_callable(when_data):
+            raise TypeError(
+                "Argument `when_data` must be a synchronous callable returning "
+                f"bool. Provided: {when_data!r}"
+            )
+        self._validate_callable_accepts_positional_args("when_data", when_data, 1)
 
     def send(
             self, 
@@ -558,6 +630,7 @@ class SummonerClient:
             data_mode: Optional[str] = None,
             every: Optional[float] = None,
             run_while: Any = None,
+            when_data: Any = None,
         ):
         if not isinstance(route, str):
             raise TypeError(f"Argument `route` must be string. Provided: {route}")
@@ -644,8 +717,10 @@ class SummonerClient:
             if data_mode is not None and not use_data:
                 raise ValueError("Argument `data_mode` requires `use_data=True`")
 
+            self._validate_when_data_spec(when_data, use_data=use_data)
             normalized_data_mode = self._normalize_data_mode(use_data, data_mode)
             run_while_kind, run_while_value, run_while_name, run_while_source = self._serialize_run_while_spec(run_while)
+            when_data_kind, when_data_value, when_data_name, when_data_source = self._serialize_when_data_spec(when_data)
             registration_id = self._allocate_sender_registration_id()
             
             # ----[ DNA capture ]----
@@ -663,6 +738,11 @@ class SummonerClient:
                 "run_while_value": run_while_value,
                 "run_while_name": run_while_name,
                 "run_while_source": run_while_source,
+                "when_data": when_data,
+                "when_data_kind": when_data_kind,
+                "when_data_value": when_data_value,
+                "when_data_name": when_data_name,
+                "when_data_source": when_data_source,
                 "source": inspect.getsource(fn),
             })
 
@@ -676,6 +756,7 @@ class SummonerClient:
                     triggers=on_triggers,
                     use_data=use_data,
                     data_mode=normalized_data_mode,
+                    when_data=when_data,
                     every=every,
                     run_while=run_while,
                     registration_id=registration_id,
@@ -705,6 +786,13 @@ class SummonerClient:
 
                         if parsed_route is not None and (actions_exist or triggers_exist):
                             self.sender_parsed_routes.setdefault(normalized_route, parsed_route)
+                            if use_data and normalized_data_mode == "snapshot":
+                                self.snapshot_capture_sender_index.setdefault(normalized_route, [])
+                                self.snapshot_capture_sender_index[normalized_route].append(sender)
+                                self.snapshot_capture_sender_parsed_routes.setdefault(
+                                    normalized_route,
+                                    parsed_route,
+                                )
                     else:
                         self.sender_index.setdefault(route, [])
                         self.sender_index[route].append(sender)
@@ -751,6 +839,9 @@ class SummonerClient:
             run_while = d.get("run_while")
             if callable(run_while):
                 yield run_while
+            when_data = d.get("when_data")
+            if callable(when_data):
+                yield when_data
 
         for d in self._dna_hooks:
             fn = d.get("fn")
@@ -926,6 +1017,10 @@ class SummonerClient:
                 "run_while_value": dna["run_while_value"],
                 "run_while_name": dna["run_while_name"],
                 "run_while_source": dna.get("run_while_source", None),
+                "when_data_kind": dna.get("when_data_kind", "none"),
+                "when_data_value": dna.get("when_data_value", None),
+                "when_data_name": dna.get("when_data_name", None),
+                "when_data_source": dna.get("when_data_source", None),
                 # Serialize triggers/actions by name so they can be re-resolved later.
                 "on_triggers": [t.name for t in (dna["on_triggers"] or [])],
                 "on_actions": [a.__name__ for a in (dna["on_actions"] or [])],
@@ -1285,6 +1380,33 @@ class SummonerClient:
             return copy.deepcopy(value)
         raise TypeError(f"Unknown data_mode: {data_mode!r}")
 
+    def _passes_when_data(self, sender: Sender, route: str, payload: Any) -> bool:
+        spec = sender.when_data
+        if spec is None:
+            return True
+        if not callable(spec):
+            self.logger.warning(
+                f"Invalid when_data specification for '{sender.fn.__name__}' "
+                f"on route '{route}': {spec!r}"
+            )
+            return False
+
+        try:
+            value = spec(payload)
+            if inspect.isawaitable(value):
+                self.logger.warning(
+                    f"when_data predicate for '{sender.fn.__name__}' on route '{route}' "
+                    "returned an awaitable; async when_data is not supported"
+                )
+                return False
+            return bool(value)
+        except Exception as e:
+            self.logger.warning(
+                f"when_data predicate failed for '{sender.fn.__name__}' on route '{route}': "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
     # ==== TIMED SENDER GUARD HELPERS ====
 
     async def _await_run_while_value(self, awaitable: Any) -> bool:
@@ -1347,6 +1469,12 @@ class SummonerClient:
             (sender.triggers and isinstance(sender.triggers, set))
         )
 
+    @staticmethod
+    def _event_snapshot_data(event: Event) -> tuple[bool, Any]:
+        if getattr(event, "_has_snapshot_data", False):
+            return True, getattr(event, "_snapshot_data", None)
+        return False, None
+
     async def _snapshot_sender_registry(self) -> tuple[dict[str, list[Sender]], dict[str, ParsedRoute]]:
         async with self.routes_lock:
             sender_index = {
@@ -1354,6 +1482,15 @@ class SummonerClient:
                 for route, routed_senders in self.sender_index.items()
             }
             sender_parsed_routes = self.sender_parsed_routes.copy()
+        return sender_index, sender_parsed_routes
+
+    async def _snapshot_capture_registry(self) -> tuple[dict[str, list[Sender]], dict[str, ParsedRoute]]:
+        async with self.routes_lock:
+            sender_index = {
+                route: list(routed_senders)
+                for route, routed_senders in self.snapshot_capture_sender_index.items()
+            }
+            sender_parsed_routes = self.snapshot_capture_sender_parsed_routes.copy()
         return sender_index, sender_parsed_routes
 
     def _drain_pending_events(self) -> list[tuple[tuple[int, ...], Optional[str], ParsedRoute, Event]]:
@@ -1370,10 +1507,50 @@ class SummonerClient:
         pending.sort(key=lambda it: hook_priority_order(it[0]))
         return pending
 
+    async def _needs_snapshot_capture_for_event(
+            self,
+            parsed_route: ParsedRoute,
+            event: Event,
+        ) -> bool:
+        if not self._flow.in_use:
+            return False
+
+        sender_index, sender_parsed_routes = await self._snapshot_capture_registry()
+
+        for route, routed_senders in sender_index.items():
+            sender_parsed_route = sender_parsed_routes.get(route)
+            if sender_parsed_route is None:
+                continue
+            if not self._route_accepts(sender_parsed_route, parsed_route):
+                continue
+
+            for sender in routed_senders:
+                if sender.responds_to(event):
+                    return True
+
+        return False
+
     async def _enqueue_sender_event(
             self,
             item: tuple[tuple[int, ...], Optional[str], ParsedRoute, Event],
         ) -> None:
+        priority, key, parsed_route, event = item
+
+        if (
+            self._flow.in_use
+            and isinstance(event, Event)
+            and (not getattr(event, "_has_snapshot_data", False))
+            and await self._needs_snapshot_capture_for_event(parsed_route, event)
+        ):
+            try:
+                event._snapshot_data = copy.deepcopy(event.data)
+                event._has_snapshot_data = True
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to capture sender snapshot data for event on route "
+                    f"'{parsed_route}': {type(e).__name__}: {e}"
+                )
+
         await self.event_bridge.put(item)
 
         if self._flow.in_use:
@@ -1446,8 +1623,11 @@ class SummonerClient:
 
                     if sender.use_data:
                         try:
+                            has_snapshot_data, snapshot_data = self._event_snapshot_data(event)
                             runtime.pending_payloads.append(
-                                self._capture_send_data(event.data, sender.data_mode)
+                                snapshot_data
+                                if sender.data_mode == "snapshot" and has_snapshot_data
+                                else self._capture_send_data(event.data, sender.data_mode)
                             )
                         except Exception as e:
                             self.logger.warning(
@@ -1654,12 +1834,20 @@ class SummonerClient:
 
                         if sender.use_data:
                             try:
-                                captured_data = self._capture_send_data(event.data, sender.data_mode)
+                                has_snapshot_data, snapshot_data = self._event_snapshot_data(event)
+                                captured_data = (
+                                    snapshot_data
+                                    if sender.data_mode == "snapshot" and has_snapshot_data
+                                    else self._capture_send_data(event.data, sender.data_mode)
+                                )
+                                payload = self._materialize_send_data(captured_data, sender.data_mode)
+                                if not self._passes_when_data(sender, route, payload):
+                                    continue
                                 invocations.append(
                                     self._make_send_invocation(
                                         route,
                                         sender,
-                                        data=self._materialize_send_data(captured_data, sender.data_mode),
+                                        data=payload,
                                         track_completion=True,
                                     )
                                 )
@@ -1808,6 +1996,9 @@ class SummonerClient:
                                         f"Failed to materialize timed sender data for '{sender.fn.__name__}' "
                                         f"on route '{route}': {type(e).__name__}: {e}"
                                     )
+                                    continue
+
+                                if not self._passes_when_data(sender, route, payload):
                                     continue
 
                                 timed_batch.append(
