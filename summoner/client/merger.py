@@ -223,7 +223,7 @@ def _resolve_callable_reference_from_source(
     try:
         if "__builtins__" not in globals_dict:
             globals_dict["__builtins__"] = __builtins__
-        exec(compile(textwrap.dedent(source), filename="<summoner_run_while>", mode="exec"), globals_dict)
+        exec(compile(textwrap.dedent(source), filename="<summoner_callable>", mode="exec"), globals_dict)
     except Exception:
         return None
 
@@ -233,16 +233,19 @@ def _resolve_callable_reference_from_source(
     return None
 
 
-def _resolve_run_while_spec(
+def _resolve_callable_spec(
         globals_dict: dict[str, Any],
         kind: str,
         value: Any,
         name: Optional[str],
         source: Optional[str] = None,
+        *,
+        spec_name: str,
+        allow_bool: bool = False,
     ) -> Any:
     if kind == "none":
         return None
-    if kind == "bool":
+    if allow_bool and kind == "bool":
         return bool(value)
     if kind == "callable":
         resolved = _resolve_callable_reference(globals_dict, name)
@@ -251,10 +254,45 @@ def _resolve_run_while_spec(
         if callable(resolved):
             return resolved
         raise ValueError(
-            "Could not resolve serialized run_while callable "
+            f"Could not resolve serialized {spec_name} callable "
             f"{name!r} from available replay context"
         )
-    raise ValueError(f"Unknown run_while kind {kind!r}")
+    raise ValueError(f"Unknown {spec_name} kind {kind!r}")
+
+
+def _resolve_run_while_spec(
+        globals_dict: dict[str, Any],
+        kind: str,
+        value: Any,
+        name: Optional[str],
+        source: Optional[str] = None,
+    ) -> Any:
+    return _resolve_callable_spec(
+        globals_dict,
+        kind,
+        value,
+        name,
+        source,
+        spec_name="run_while",
+        allow_bool=True,
+    )
+
+
+def _resolve_when_data_spec(
+        globals_dict: dict[str, Any],
+        kind: str,
+        value: Any,
+        name: Optional[str],
+        source: Optional[str] = None,
+    ) -> Any:
+    return _resolve_callable_spec(
+        globals_dict,
+        kind,
+        value,
+        name,
+        source,
+        spec_name="when_data",
+    )
 
 
 class ClientMerger(SummonerClient):
@@ -930,6 +968,15 @@ class ClientMerger(SummonerClient):
                                 dna.get("run_while_name", None),
                                 dna.get("run_while_source", None),
                             )
+                        when_data = dna.get("when_data")
+                        if when_data is None:
+                            when_data = _resolve_when_data_spec(
+                                fn_clone.__globals__,
+                                dna.get("when_data_kind", "none"),
+                                dna.get("when_data_value", None),
+                                dna.get("when_data_name", None),
+                                dna.get("when_data_source", None),
+                            )
                         self.send(
                             route,
                             multi=dna.get("multi", False),
@@ -939,6 +986,7 @@ class ClientMerger(SummonerClient):
                             data_mode=dna.get("data_mode", None),
                             every=dna.get("every", None),
                             run_while=run_while,
+                            when_data=when_data,
                         )(fn_clone)
                     except Exception as e:
                         self.logger.warning(
@@ -971,6 +1019,13 @@ class ClientMerger(SummonerClient):
                         entry.get("run_while_name", None),
                         entry.get("run_while_source", None),
                     )
+                    when_data = _resolve_when_data_spec(
+                        g,
+                        entry.get("when_data_kind", "none"),
+                        entry.get("when_data_value", None),
+                        entry.get("when_data_name", None),
+                        entry.get("when_data_source", None),
+                    )
                     dec = self.send(
                         route,
                         multi=entry.get("multi", False),
@@ -980,6 +1035,7 @@ class ClientMerger(SummonerClient):
                         data_mode=entry.get("data_mode", None),
                         every=entry.get("every", None),
                         run_while=run_while,
+                        when_data=when_data,
                     )
                     self._apply_with_source_patch(dec, fn, entry["source"])
 
@@ -1341,6 +1397,13 @@ class ClientTranslation(SummonerClient):
                 entry.get("run_while_name", None),
                 entry.get("run_while_source", None),
             )
+            when_data = _resolve_when_data_spec(
+                g,
+                entry.get("when_data_kind", "none"),
+                entry.get("when_data_value", None),
+                entry.get("when_data_name", None),
+                entry.get("when_data_source", None),
+            )
             dec = self.send(
                 route,
                 multi=entry.get("multi", False),
@@ -1350,6 +1413,7 @@ class ClientTranslation(SummonerClient):
                 data_mode=entry.get("data_mode", None),
                 every=entry.get("every", None),
                 run_while=run_while,
+                when_data=when_data,
             )
             self._apply_with_source_patch(dec, fn, entry["source"])
 

@@ -222,10 +222,12 @@ def build_triggers(tree: dict[str, Any]):
 
 
 class Event:
-    __slots__ = ("signal", "data")
+    __slots__ = ("signal", "data", "_snapshot_data", "_has_snapshot_data")
     def __init__(self, signal: Signal, data: Any = None) -> None:
         self.signal = signal
         self.data = data
+        self._snapshot_data = None
+        self._has_snapshot_data = False
     def __repr__(self) -> str:
         if self.data is None:
             return f"{type(self).__name__}({self.signal!r})"

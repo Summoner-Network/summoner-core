@@ -313,6 +313,7 @@ class Sender:
         'triggers',
         'use_data',
         'data_mode',
+        'when_data',
         'every',
         'run_while',
         'registration_id',
@@ -323,6 +324,7 @@ class Sender:
     triggers: Optional[set[Signal]]
     use_data: bool
     data_mode: Optional[str]
+    when_data: Any
     every: Optional[float]
     run_while: Any
     registration_id: Optional[str]
@@ -335,6 +337,7 @@ class Sender:
             triggers: Optional[set[Signal]],
             use_data: bool = False,
             data_mode: Optional[str] = None,
+            when_data: Any = None,
             every: Optional[float] = None,
             run_while: Any = None,
             registration_id: Optional[str] = None,
@@ -345,6 +348,7 @@ class Sender:
         object.__setattr__(self, "triggers", triggers)
         object.__setattr__(self, "use_data", use_data)
         object.__setattr__(self, "data_mode", data_mode)
+        object.__setattr__(self, "when_data", when_data)
         object.__setattr__(self, "every", every)
         object.__setattr__(self, "run_while", run_while)
         object.__setattr__(self, "registration_id", registration_id)

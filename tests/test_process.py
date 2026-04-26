@@ -170,6 +170,7 @@ def test_sender_use_data_defaults_to_false():
     sender = Sender(fn=lambda: None, multi=False, actions=None, triggers=None)
     assert sender.use_data is False
     assert sender.data_mode is None
+    assert sender.when_data is None
     assert sender.every is None
     assert sender.run_while is None
     assert sender.registration_id is None
