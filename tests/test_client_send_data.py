@@ -11,6 +11,13 @@ from summoner.protocol.triggers import load_triggers
 from .helpers import DummyWriter
 
 
+WHEN_DATA_FLAG = True
+
+
+def when_data_uses_module_flag(data: dict) -> bool:
+    return WHEN_DATA_FLAG and data.get("ready", False)
+
+
 def test_send_use_data_requires_one_argument():
     client = SummonerClient("send-data")
     client.flow().activate()
@@ -53,12 +60,16 @@ def test_send_default_dna_writes_use_data_false():
         assert client._dna_senders[0]["every"] is None
         assert client._dna_senders[0]["run_while_kind"] == "none"
         assert client._dna_senders[0]["run_while_source"] is None
+        assert client._dna_senders[0]["when_data_kind"] == "none"
+        assert client._dna_senders[0]["when_data_source"] is None
         dna_entries = json.loads(client.dna())
         assert dna_entries[0]["use_data"] is False
         assert dna_entries[0]["data_mode"] is None
         assert dna_entries[0]["every"] is None
         assert dna_entries[0]["run_while_kind"] == "none"
         assert dna_entries[0]["run_while_source"] is None
+        assert dna_entries[0]["when_data_kind"] == "none"
+        assert dna_entries[0]["when_data_source"] is None
     finally:
         client.loop.close()
 
@@ -189,6 +200,39 @@ def test_send_use_data_requires_reactive_sender():
     try:
         with pytest.raises(ValueError):
             @client.send(route="request", use_data=True)
+            async def bad_sender(data: dict) -> None:
+                return None
+    finally:
+        client.loop.close()
+
+
+def test_send_when_data_requires_use_data():
+    client = SummonerClient("send-data")
+
+    try:
+        with pytest.raises(ValueError):
+            @client.send(route="request", when_data=lambda data: True)
+            async def bad_sender() -> None:
+                return None
+    finally:
+        client.loop.close()
+
+
+def test_send_when_data_rejects_async_predicates():
+    client = SummonerClient("send-data")
+    client.flow().activate()
+
+    try:
+        async def bad_when_data(data: dict) -> bool:
+            return True
+
+        with pytest.raises(TypeError):
+            @client.send(
+                route="request",
+                on_actions={Action.STAY},
+                use_data=True,
+                when_data=bad_when_data,
+            )
             async def bad_sender(data: dict) -> None:
                 return None
     finally:
@@ -345,6 +389,223 @@ def test_send_use_data_preserves_one_call_per_queued_event():
         client.loop.close()
 
 
+def test_send_use_data_snapshot_freezes_mutations_after_enqueue():
+    client = SummonerClient("send-data")
+    client.flow().activate()
+
+    Trigger = load_triggers(json_dict={"go": None})
+    seen: list[dict] = []
+
+    try:
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            on_triggers={Trigger.go},
+            use_data=True,
+            data_mode="snapshot",
+        )
+        async def snapshot_sender(data: dict) -> None:
+            seen.append({"turn": data["turn"], "items": list(data["items"])})
+            await client.quit()
+            return None
+
+        client.loop.run_until_complete(client._wait_for_registration())
+
+        writer = DummyWriter()
+        stop_event = asyncio.Event()
+
+        client.send_queue = asyncio.Queue()
+        client.event_bridge = asyncio.Queue()
+        client.batch_drain = True
+        client.max_concurrent_workers = 1
+        client.max_consecutive_worker_errors = 3
+        client.send_queue_maxsize = 8
+        client.event_bridge_maxsize = 8
+
+        parsed_route = client.flow().parse_route("request")
+        payload = {"turn": 1, "items": []}
+
+        client.loop.run_until_complete(
+            client._enqueue_sender_event(
+                ((), "peer-a", parsed_route, Action.STAY(Trigger.go, data=payload))
+            )
+        )
+        payload["items"].append("mutated")
+
+        client._start_send_workers(writer, stop_event)
+        client.loop.run_until_complete(client.message_sender_loop(writer, stop_event))
+        client.loop.run_until_complete(client._cleanup_workers())
+
+        assert seen == [{"turn": 1, "items": []}]
+    finally:
+        client.loop.close()
+
+
+def test_send_use_data_live_observes_mutations_after_enqueue():
+    client = SummonerClient("send-data")
+    client.flow().activate()
+
+    Trigger = load_triggers(json_dict={"go": None})
+    seen: list[dict] = []
+
+    try:
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            on_triggers={Trigger.go},
+            use_data=True,
+            data_mode="live",
+        )
+        async def live_sender(data: dict) -> None:
+            seen.append({"turn": data["turn"], "items": list(data["items"])})
+            await client.quit()
+            return None
+
+        client.loop.run_until_complete(client._wait_for_registration())
+
+        writer = DummyWriter()
+        stop_event = asyncio.Event()
+
+        client.send_queue = asyncio.Queue()
+        client.event_bridge = asyncio.Queue()
+        client.batch_drain = True
+        client.max_concurrent_workers = 1
+        client.max_consecutive_worker_errors = 3
+        client.send_queue_maxsize = 8
+        client.event_bridge_maxsize = 8
+
+        parsed_route = client.flow().parse_route("request")
+        payload = {"turn": 1, "items": []}
+
+        client.loop.run_until_complete(
+            client._enqueue_sender_event(
+                ((), "peer-a", parsed_route, Action.STAY(Trigger.go, data=payload))
+            )
+        )
+        payload["items"].append("mutated")
+
+        client._start_send_workers(writer, stop_event)
+        client.loop.run_until_complete(client.message_sender_loop(writer, stop_event))
+        client.loop.run_until_complete(client._cleanup_workers())
+
+        assert seen == [{"turn": 1, "items": ["mutated"]}]
+    finally:
+        client.loop.close()
+
+
+def test_send_use_data_snapshot_isolates_multiple_matching_senders():
+    client = SummonerClient("send-data")
+    client.flow().activate()
+
+    Trigger = load_triggers(json_dict={"go": None})
+    first_seen: list[list[str]] = []
+    second_seen: list[list[str]] = []
+
+    try:
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            on_triggers={Trigger.go},
+            use_data=True,
+            data_mode="snapshot",
+        )
+        async def first_sender(data: dict) -> None:
+            data["items"].append("sender-one")
+            first_seen.append(list(data["items"]))
+            return None
+
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            on_triggers={Trigger.go},
+            use_data=True,
+            data_mode="snapshot",
+        )
+        async def second_sender(data: dict) -> None:
+            second_seen.append(list(data["items"]))
+            await client.quit()
+            return None
+
+        client.loop.run_until_complete(client._wait_for_registration())
+
+        writer = DummyWriter()
+        stop_event = asyncio.Event()
+
+        client.send_queue = asyncio.Queue()
+        client.event_bridge = asyncio.Queue()
+        client.batch_drain = True
+        client.max_concurrent_workers = 1
+        client.max_consecutive_worker_errors = 3
+        client.send_queue_maxsize = 8
+        client.event_bridge_maxsize = 8
+
+        parsed_route = client.flow().parse_route("request")
+        payload = {"items": []}
+
+        client.loop.run_until_complete(
+            client._enqueue_sender_event(
+                ((), "peer-a", parsed_route, Action.STAY(Trigger.go, data=payload))
+            )
+        )
+
+        client._start_send_workers(writer, stop_event)
+        client.loop.run_until_complete(client.message_sender_loop(writer, stop_event))
+        client.loop.run_until_complete(client._cleanup_workers())
+
+        assert first_seen == [["sender-one"]]
+        assert second_seen == [[]]
+    finally:
+        client.loop.close()
+
+
+def test_send_when_data_filters_payloads_before_sender_runs():
+    client = SummonerClient("send-data")
+    client.flow().activate()
+
+    Trigger = load_triggers(json_dict={"go": None})
+    seen: list[dict] = []
+
+    try:
+        @client.send(
+            route="request",
+            on_actions={Action.STAY},
+            use_data=True,
+            when_data=lambda data: data["turn"] % 2 == 0,
+        )
+        async def good_sender(data: dict) -> None:
+            seen.append(data)
+            async with client.connection_lock:
+                client._quit = True
+            return None
+
+        client.loop.run_until_complete(client._wait_for_registration())
+
+        writer = DummyWriter()
+        stop_event = asyncio.Event()
+
+        client.send_queue = asyncio.Queue()
+        client.event_bridge = asyncio.Queue()
+        client.batch_drain = True
+        client.max_concurrent_workers = 1
+        client.max_consecutive_worker_errors = 3
+        client.send_queue_maxsize = 8
+
+        parsed_route = client.flow().parse_route("request")
+        first = {"turn": 1, "text": "skip"}
+        second = {"turn": 2, "text": "keep"}
+
+        client.event_bridge.put_nowait(((), "peer-a", parsed_route, Action.STAY(Trigger.go, data=first)))
+        client.event_bridge.put_nowait(((), "peer-a", parsed_route, Action.STAY(Trigger.go, data=second)))
+
+        worker = client.loop.create_task(client._send_worker(writer, stop_event))
+        client.loop.run_until_complete(client.message_sender_loop(writer, stop_event))
+        client.loop.run_until_complete(worker)
+
+        assert seen == [second]
+    finally:
+        client.loop.close()
+
+
 def test_send_multi_use_data_on_triggers_only_emits_all_payloads():
     client = SummonerClient("send-data")
     client.flow().activate()
@@ -394,6 +655,40 @@ def test_send_multi_use_data_on_triggers_only_emits_all_payloads():
         assert b'"turn": 2' in writer.messages[2]
     finally:
         client.loop.close()
+
+
+def test_client_translation_replays_when_data_source_with_context_globals():
+    source = SummonerClient("source-when-data-context")
+    translated = None
+
+    try:
+        source.flow().activate()
+
+        @source.send(
+            route="request",
+            on_actions={Action.STAY},
+            use_data=True,
+            when_data=when_data_uses_module_flag,
+        )
+        async def source_sender(data: dict) -> None:
+            return None
+
+        source.loop.run_until_complete(source._wait_for_registration())
+
+        dna_entries = json.loads(source.dna(include_context=True))
+        translated = ClientTranslation(dna_entries, name="translated-when-data")
+        translated.flow().activate()
+        translated.initiate_senders()
+        translated.loop.run_until_complete(translated._wait_for_registration())
+
+        sender = translated.sender_index["request"][0]
+        assert callable(sender.when_data)
+        assert sender.when_data({"ready": True}) is True
+        assert sender.when_data({"ready": False}) is False
+    finally:
+        source.loop.close()
+        if translated is not None:
+            translated.loop.close()
 
 
 def test_send_without_use_data_keeps_legacy_dedup_behavior():
