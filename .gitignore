@@ -1,4 +1,5 @@
 # Remy's
+# Remy's
 trash/
 experiments/
 *.DS_Store
@@ -8,9 +9,9 @@ experiments/
 *.old
 *.backup.*
 logs/
-img/assets/
-simulations/summoner_mock.py
 test_logs.py
+validation_draft.json
+server_comm.jsonc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

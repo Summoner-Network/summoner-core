@@ -15,7 +15,8 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "aioconsole==0.8.1",
-        "python-dotenv~=1.2.1",
+        "python-dotenv~=1.2.1; python_version < '3.10'",
+        "python-dotenv~=1.2.2; python_version >= '3.10'",
         "typing_extensions==4.15.0; python_version < '3.13'",
     ],
     extras_require={
