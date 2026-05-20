@@ -38,12 +38,46 @@
         "worker_threads": "Number of Tokio threads (default = cores-1)",
         
         "backpressure_policy": {
-        "enable_throttle": "Enable throttling when queue > threshold",
-        "throttle_threshold": "Start throttling at this queue length",
-        "enable_flow_control": "Enable flow control when queue > threshold",
-        "flow_control_threshold": "Start flow control at this queue length",
-        "enable_disconnect": "Disconnect clients when queue > threshold",
-        "disconnect_threshold": "Disconnect when queue length exceeds this"
+            "enable_throttle": "Enable throttling when queue > threshold",
+            "throttle_threshold": "Start throttling at this queue length",
+            "enable_flow_control": "Enable flow control when queue > threshold",
+            "flow_control_threshold": "Start flow control at this queue length",
+            "enable_disconnect": "Disconnect clients when queue > threshold",
+            "disconnect_threshold": "Disconnect when queue length exceeds this"
+        },
+
+        "dedicated_relay": {
+            "enabled": "Enable identity-verified directed relay",
+            "validation_adapter": "Validation format (currently aurora)",
+            "max_frame_bytes": "Maximum accepted payload size in bytes",
+            "allowed_fingerprints": "Identity fingerprints allowed to connect",
+            "communication_graph": "Allowed sender -> receiver routes",
+
+            "paths": {
+                "envelope_root": "Dot path to the signed envelope root",
+                "sender_identity": "Dot path to the sender identity",
+                "receiver_identity": "Dot path to the receiver identity or fingerprint",
+                "envelope_signature": "Dot path to the envelope signature",
+                "sender_signing_key": "Dot path to the sender public signing key",
+                "sender_identity_signature": "Dot path to the sender identity signature"
+            },
+
+            "policy": {
+                "allow_receiverless_binding": "Allow valid receiverless identity binding",
+                "route_receiverless_to_graph": "Relay receiverless payloads through graph routes",
+                "reject_unknown_receiver": "Reject receivers outside the allowlist",
+                "reject_when_receiver_disconnected": "Reject when receiver is not connected"
+            },
+
+            "invalid_attempts": {
+                "enabled": "Track invalid relay attempts by IP",
+                "window_secs": "Invalid-attempt counting window",
+                "max_entries": "Maximum tracked IP entries",
+                "throttle_threshold": "Attempts before throttling",
+                "flow_control_threshold": "Attempts before flow control",
+                "disconnect_threshold": "Attempts before disconnect",
+                "quarantine_threshold": "Attempts before quarantine"
+            }
         }
 
     }

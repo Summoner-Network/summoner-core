@@ -2,6 +2,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use std::collections::{HashMap, HashSet};
+
 // We need Duration to turn seconds into a Rust time value
 use std::time::Duration;
 
@@ -58,13 +60,113 @@ pub struct LoggerConfig {
     pub date_format: String,
     // Optional list of keys to include when logging dictionary messages in JSON
     pub log_keys: Option<Vec<String>>,
-
     // Maximum number of bytes per log file before rotation occurs
     // pub max_file_size: usize,
     // Number of rotated log files to keep before older ones are deleted
     // pub backup_count: usize,
 }
 
+////////////////////////////
+// Dedicated Relay Config //
+////////////////////////////
+
+/// Configurable JSON paths used by the dedicated relay validator.
+#[derive(Debug, Clone)]
+pub struct DedicatedRelayPaths {
+    pub envelope_root: String,
+    pub sender_identity: String,
+    pub receiver_identity: String,
+    pub envelope_signature: String,
+    pub sender_signing_key: String,
+    pub sender_identity_signature: String,
+}
+
+impl Default for DedicatedRelayPaths {
+    fn default() -> Self {
+        Self {
+            envelope_root: "".to_string(),
+            sender_identity: "from".to_string(),
+            receiver_identity: "to".to_string(),
+            envelope_signature: "sig".to_string(),
+            sender_signing_key: "from.pub_sig_b64".to_string(),
+            sender_identity_signature: "from.sig".to_string(),
+        }
+    }
+}
+
+/// Policy switches for dedicated identity relay behavior.
+#[derive(Debug, Clone)]
+pub struct DedicatedRelayPolicy {
+    pub allow_receiverless_binding: bool,
+    pub route_receiverless_to_graph: bool,
+    pub reject_unknown_receiver: bool,
+    pub reject_when_receiver_disconnected: bool,
+}
+
+impl Default for DedicatedRelayPolicy {
+    fn default() -> Self {
+        Self {
+            allow_receiverless_binding: true,
+            route_receiverless_to_graph: true,
+            reject_unknown_receiver: true,
+            reject_when_receiver_disconnected: false,
+        }
+    }
+}
+
+/// Rules for escalating repeated invalid identity relay attempts.
+#[derive(Debug, Clone)]
+pub struct InvalidAttemptPolicy {
+    pub enabled: bool,
+    pub window_secs: u64,
+    pub max_entries: usize,
+    pub throttle_threshold: usize,
+    pub flow_control_threshold: usize,
+    pub disconnect_threshold: usize,
+    pub quarantine_threshold: usize,
+}
+
+impl Default for InvalidAttemptPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window_secs: 60,
+            max_entries: 10_000,
+            throttle_threshold: 3,
+            flow_control_threshold: 6,
+            disconnect_threshold: 10,
+            quarantine_threshold: 12,
+        }
+    }
+}
+
+/// Dedicated relay mode accepts signed identity envelopes and routes by fingerprint.
+#[derive(Debug, Clone)]
+pub struct DedicatedRelayConfig {
+    pub enabled: bool,
+    pub validation_adapter: String,
+    pub allowed_fingerprints: HashSet<String>,
+    pub communication_graph: HashMap<String, HashSet<String>>,
+    pub paths: DedicatedRelayPaths,
+    pub policy: DedicatedRelayPolicy,
+    pub invalid_attempts: InvalidAttemptPolicy,
+    pub max_frame_bytes: usize,
+}
+
+impl Default for DedicatedRelayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            validation_adapter: "aurora".to_string(),
+            allowed_fingerprints: HashSet::new(),
+            communication_graph: HashMap::new(),
+            paths: DedicatedRelayPaths::default(),
+            policy: DedicatedRelayPolicy::default(),
+            invalid_attempts: InvalidAttemptPolicy::default(),
+            max_frame_bytes: 1_048_576,
+        }
+    }
+}
 
 //////////////////////
 // ServerConfig     //
@@ -75,19 +177,19 @@ pub struct LoggerConfig {
 pub struct ServerConfig {
     /// IP or hostname to listen on (e.g. `"127.0.0.1"`)
     pub host: String,
-    
+
     /// Port number (e.g. `8888`)
     pub port: u16,
 
     /// Logger configuration (text/JSON, file rotation, key filtering, etc.)
     pub logger: LoggerConfig,
-    
+
     /// How many incoming connections we'll buffer before backpressure
     pub connection_buffer_size: usize,
-    
+
     /// Seconds before we drop an idle client
     pub client_timeout: Option<Duration>,
-    
+
     /// Max messages each client can send per minute
     pub rate_limit: u32,
 
@@ -123,6 +225,9 @@ pub struct ServerConfig {
 
     /// How many Tokio worker threads to spin up (defaults to cpu-1)
     pub worker_threads: usize,
+
+    /// Optional signed-identity relay mode that routes by configured fingerprints.
+    pub dedicated_relay: DedicatedRelayConfig,
 }
 
 /////////////////////////////////////////////
@@ -134,21 +239,20 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
     type Error = PyErr;
 
     fn try_from(dict: &Bound<'py, PyDict>) -> Result<Self, PyErr> {
-        
         // Helper: look up `key` in the dict, or fall back to `default`.
         // If the Python value has the wrong type, we warn but still use `default`.
         fn extract_or<'py, T: FromPyObject<'py>>(
             dict: &'py Bound<'py, PyDict>,
             key: &str,
-            default: T
+            default: T,
         ) -> T {
             match dict.get_item(key) {
                 // Key exists; try to convert it to Rust type T
                 Ok(Some(value)) => match value.extract::<T>() {
-                    Ok(val) => val,                 // Good conversion
+                    Ok(val) => val, // Good conversion
                     Err(err) => {
                         eprintln!("Warning: '{}' has wrong type: {}", key, err);
-                        default                      // Fall back
+                        default // Fall back
                     }
                 },
                 // Key missing or other error: just use default
@@ -156,34 +260,46 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
             }
         }
 
+        fn nested_dict<'py>(
+            dict: &'py Bound<'py, PyDict>,
+            key: &str,
+        ) -> Option<Bound<'py, PyDict>> {
+            match dict.get_item(key) {
+                Ok(Some(value)) => match value.downcast::<PyDict>() {
+                    Ok(downcasted) => Some(downcasted.clone()),
+                    Err(_) => None,
+                },
+                _ => None,
+            }
+        }
+
         // Read each setting, supplying a sensible default value
-        let host                          = extract_or(dict, "host", "127.0.0.1".to_string());
-        let port                          = extract_or(dict, "port", 8888);
-        let connection_buffer_size        = extract_or(dict, "connection_buffer_size", 128);
-        
-        let rate_limit                    = extract_or(dict, "rate_limit_msgs_per_minute", 300);
-        let command_buffer_size           = extract_or(dict, "command_buffer_size", 32);
-        let quarantine_cooldown_secs      = extract_or(dict, "quarantine_cooldown_secs", 300);
-        let throttle_delay_ms             = extract_or(dict, "throttle_delay_ms", 200);
-        let flow_control_delay_ms         = extract_or(dict, "flow_control_delay_ms", 1000);
-        let timeout_check_interval_secs   = extract_or(dict, "timeout_check_interval_secs", 30);
-        let accept_error_backoff_ms       = extract_or(dict, "accept_error_backoff_ms", 100);
-        let control_channel_capacity      = extract_or(dict, "control_channel_capacity", 8);
-        let queue_monitor_capacity        = extract_or(dict, "queue_monitor_capacity", 100);
-        let quarantine_cleanup_interval_secs = extract_or(dict, "quarantine_cleanup_interval_secs", 60);
+        let host = extract_or(dict, "host", "127.0.0.1".to_string());
+        let port = extract_or(dict, "port", 8888);
+        let connection_buffer_size = extract_or(dict, "connection_buffer_size", 128);
+
+        let rate_limit = extract_or(dict, "rate_limit_msgs_per_minute", 300);
+        let command_buffer_size = extract_or(dict, "command_buffer_size", 32);
+        let quarantine_cooldown_secs = extract_or(dict, "quarantine_cooldown_secs", 300);
+        let throttle_delay_ms = extract_or(dict, "throttle_delay_ms", 200);
+        let flow_control_delay_ms = extract_or(dict, "flow_control_delay_ms", 1000);
+        let timeout_check_interval_secs = extract_or(dict, "timeout_check_interval_secs", 30);
+        let accept_error_backoff_ms = extract_or(dict, "accept_error_backoff_ms", 100);
+        let control_channel_capacity = extract_or(dict, "control_channel_capacity", 8);
+        let queue_monitor_capacity = extract_or(dict, "queue_monitor_capacity", 100);
+        let quarantine_cleanup_interval_secs =
+            extract_or(dict, "quarantine_cleanup_interval_secs", 60);
 
         // Optional client timeout
         let client_timeout = match dict.get_item("client_timeout_secs")? {
             Some(value) if value.is_none() => None,
-            Some(value) => {
-                match value.extract::<u64>() {
-                    Ok(secs) => Some(Duration::from_secs(secs)),
-                    Err(err) => {
-                        eprintln!("Warning: 'client_timeout_secs' wrong type: {}", err);
-                        Some(Duration::from_secs(300))
-                    }
+            Some(value) => match value.extract::<u64>() {
+                Ok(secs) => Some(Duration::from_secs(secs)),
+                Err(err) => {
+                    eprintln!("Warning: 'client_timeout_secs' wrong type: {}", err);
+                    Some(Duration::from_secs(300))
                 }
-            }
+            },
             None => Some(Duration::from_secs(300)),
         };
 
@@ -208,12 +324,12 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
 
         // Build the BackpressurePolicy from keys inside bp_dict
         let backpressure_policy = BackpressurePolicy {
-            enable_throttle       : extract_or(&bp_dict, "enable_throttle", true),
-            throttle_threshold    : extract_or(&bp_dict, "throttle_threshold", 100),
-            enable_flow_control   : extract_or(&bp_dict, "enable_flow_control", true),
+            enable_throttle: extract_or(&bp_dict, "enable_throttle", true),
+            throttle_threshold: extract_or(&bp_dict, "throttle_threshold", 100),
+            enable_flow_control: extract_or(&bp_dict, "enable_flow_control", true),
             flow_control_threshold: extract_or(&bp_dict, "flow_control_threshold", 300),
-            enable_disconnect     : extract_or(&bp_dict, "enable_disconnect",  true),
-            disconnect_threshold  : extract_or(&bp_dict, "disconnect_threshold", 500),
+            enable_disconnect: extract_or(&bp_dict, "enable_disconnect", true),
+            disconnect_threshold: extract_or(&bp_dict, "disconnect_threshold", 500),
         };
 
         // Now handle the nested "logger" dict, if provided
@@ -221,22 +337,26 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
             // If it's a dict, use it
             Some(obj) => match obj.downcast::<PyDict>() {
                 Ok(downcasted) => downcasted.clone(),
-                Err(_)         => dict.clone(),
+                Err(_) => dict.clone(),
             },
             // No key: reuse the top-level dict for defaults
             None => dict.clone(),
         };
 
         // Extract each logger setting, with defaults matching your Python JSON schema
-        let log_level           = extract_or(&logger_dict, "log_level",           "DEBUG".to_string());
-        let enable_console_log  = extract_or(&logger_dict, "enable_console_log",  true);
+        let log_level = extract_or(&logger_dict, "log_level", "DEBUG".to_string());
+        let enable_console_log = extract_or(&logger_dict, "enable_console_log", true);
         // let console_log_format  = extract_or(&logger_dict, "console_log_format",  "\x1b[92m{}\x1b[0m - \x1b[94m{}\x1b[0m - {} - {}".to_string());
-        let enable_file_log     = extract_or(&logger_dict, "enable_file_log",     false);
-        let log_file_path       = extract_or(&logger_dict, "log_file_path",       "".to_string());
+        let enable_file_log = extract_or(&logger_dict, "enable_file_log", false);
+        let log_file_path = extract_or(&logger_dict, "log_file_path", "".to_string());
         // let log_format          = extract_or(&logger_dict, "log_format",          "{} - {} - {} - {}".to_string());
-        let date_format         = extract_or(&logger_dict, "date_format",         "%Y-%m-%d %H:%M:%S.%3f".to_string());
-        let enable_json_log     = extract_or(&logger_dict, "enable_json_log",     false);
-        let log_keys            = extract_or(&logger_dict, "log_keys",            None);
+        let date_format = extract_or(
+            &logger_dict,
+            "date_format",
+            "%Y-%m-%d %H:%M:%S.%3f".to_string(),
+        );
+        let enable_json_log = extract_or(&logger_dict, "enable_json_log", false);
+        let log_keys = extract_or(&logger_dict, "log_keys", None);
         // let max_file_size       = extract_or(&logger_dict, "max_file_size",       1_000_000);
         // let backup_count        = extract_or(&logger_dict, "backup_count",        3);
 
@@ -252,6 +372,165 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
             log_keys,
             // max_file_size,
             // backup_count,
+        };
+
+        let dedicated_relay = if let Some(relay_dict) = nested_dict(dict, "dedicated_relay") {
+            let defaults = DedicatedRelayConfig::default();
+
+            let paths_defaults = DedicatedRelayPaths::default();
+            let paths_dict = nested_dict(&relay_dict, "paths");
+            let paths = if let Some(paths_dict) = paths_dict {
+                DedicatedRelayPaths {
+                    envelope_root: extract_or(
+                        &paths_dict,
+                        "envelope_root",
+                        paths_defaults.envelope_root,
+                    ),
+                    sender_identity: extract_or(
+                        &paths_dict,
+                        "sender_identity",
+                        paths_defaults.sender_identity,
+                    ),
+                    receiver_identity: extract_or(
+                        &paths_dict,
+                        "receiver_identity",
+                        paths_defaults.receiver_identity,
+                    ),
+                    envelope_signature: extract_or(
+                        &paths_dict,
+                        "envelope_signature",
+                        paths_defaults.envelope_signature,
+                    ),
+                    sender_signing_key: extract_or(
+                        &paths_dict,
+                        "sender_signing_key",
+                        paths_defaults.sender_signing_key,
+                    ),
+                    sender_identity_signature: extract_or(
+                        &paths_dict,
+                        "sender_identity_signature",
+                        paths_defaults.sender_identity_signature,
+                    ),
+                }
+            } else {
+                paths_defaults
+            };
+
+            let policy_defaults = DedicatedRelayPolicy::default();
+            let policy_dict = nested_dict(&relay_dict, "policy");
+            let policy = if let Some(policy_dict) = policy_dict {
+                DedicatedRelayPolicy {
+                    allow_receiverless_binding: extract_or(
+                        &policy_dict,
+                        "allow_receiverless_binding",
+                        policy_defaults.allow_receiverless_binding,
+                    ),
+                    route_receiverless_to_graph: extract_or(
+                        &policy_dict,
+                        "route_receiverless_to_graph",
+                        policy_defaults.route_receiverless_to_graph,
+                    ),
+                    reject_unknown_receiver: extract_or(
+                        &policy_dict,
+                        "reject_unknown_receiver",
+                        policy_defaults.reject_unknown_receiver,
+                    ),
+                    reject_when_receiver_disconnected: extract_or(
+                        &policy_dict,
+                        "reject_when_receiver_disconnected",
+                        policy_defaults.reject_when_receiver_disconnected,
+                    ),
+                }
+            } else {
+                policy_defaults
+            };
+
+            let invalid_defaults = InvalidAttemptPolicy::default();
+            let invalid_dict = nested_dict(&relay_dict, "invalid_attempts");
+            let invalid_attempts = if let Some(invalid_dict) = invalid_dict {
+                InvalidAttemptPolicy {
+                    enabled: extract_or(&invalid_dict, "enabled", invalid_defaults.enabled),
+                    window_secs: extract_or(
+                        &invalid_dict,
+                        "window_secs",
+                        invalid_defaults.window_secs,
+                    ),
+                    max_entries: extract_or(
+                        &invalid_dict,
+                        "max_entries",
+                        invalid_defaults.max_entries,
+                    ),
+                    throttle_threshold: extract_or(
+                        &invalid_dict,
+                        "throttle_threshold",
+                        invalid_defaults.throttle_threshold,
+                    ),
+                    flow_control_threshold: extract_or(
+                        &invalid_dict,
+                        "flow_control_threshold",
+                        invalid_defaults.flow_control_threshold,
+                    ),
+                    disconnect_threshold: extract_or(
+                        &invalid_dict,
+                        "disconnect_threshold",
+                        invalid_defaults.disconnect_threshold,
+                    ),
+                    quarantine_threshold: extract_or(
+                        &invalid_dict,
+                        "quarantine_threshold",
+                        invalid_defaults.quarantine_threshold,
+                    ),
+                }
+            } else {
+                invalid_defaults
+            };
+
+            let allowed_raw: Vec<String> =
+                extract_or(&relay_dict, "allowed_fingerprints", Vec::new());
+            let allowed_fingerprints = allowed_raw
+                .into_iter()
+                .map(|fp| fp.trim().to_string())
+                .filter(|fp| !fp.is_empty())
+                .collect::<HashSet<_>>();
+
+            let graph_raw: HashMap<String, Vec<String>> =
+                extract_or(&relay_dict, "communication_graph", HashMap::new());
+            let communication_graph = graph_raw
+                .into_iter()
+                .filter_map(|(sender, receivers)| {
+                    let sender = sender.trim().to_string();
+                    if sender.is_empty() {
+                        return None;
+                    }
+                    let receivers = receivers
+                        .into_iter()
+                        .map(|fp| fp.trim().to_string())
+                        .filter(|fp| !fp.is_empty())
+                        .collect::<HashSet<_>>();
+                    Some((sender, receivers))
+                })
+                .collect::<HashMap<_, _>>();
+
+            DedicatedRelayConfig {
+                enabled: extract_or(&relay_dict, "enabled", defaults.enabled),
+                validation_adapter: extract_or(
+                    &relay_dict,
+                    "validation_adapter",
+                    defaults.validation_adapter,
+                ),
+                allowed_fingerprints,
+                communication_graph,
+                paths,
+                policy,
+                invalid_attempts,
+                max_frame_bytes: extract_or(
+                    &relay_dict,
+                    "max_frame_bytes",
+                    defaults.max_frame_bytes,
+                ),
+            }
+        } else {
+            DedicatedRelayConfig::default()
         };
 
         // Finally, assemble our ServerConfig struct and return it
@@ -273,6 +552,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
             queue_monitor_capacity,
             quarantine_cleanup_interval_secs,
             worker_threads,
+            dedicated_relay,
         })
     }
 }

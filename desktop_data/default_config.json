@@ -48,6 +48,37 @@
       "flow_control_threshold": 300,
       "enable_disconnect": true,
       "disconnect_threshold": 500
+    },
+
+    "dedicated_relay": {
+      "enabled": false,
+      "validation_adapter": "aurora",
+      "max_frame_bytes": 1048576,
+      "allowed_fingerprints": [],
+      "communication_graph": {},
+      "paths": {
+        "envelope_root": "",
+        "sender_identity": "from",
+        "receiver_identity": "to",
+        "envelope_signature": "sig",
+        "sender_signing_key": "from.pub_sig_b64",
+        "sender_identity_signature": "from.sig"
+      },
+      "policy": {
+        "allow_receiverless_binding": true,
+        "route_receiverless_to_graph": true,
+        "reject_unknown_receiver": true,
+        "reject_when_receiver_disconnected": false
+      },
+      "invalid_attempts": {
+        "enabled": true,
+        "window_secs": 60,
+        "max_entries": 10000,
+        "throttle_threshold": 3,
+        "flow_control_threshold": 6,
+        "disconnect_threshold": 10,
+        "quarantine_threshold": 12
+      }
     }
 
   }
