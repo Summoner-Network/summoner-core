@@ -37,12 +37,46 @@
         "worker_threads": "Number of Tokio runtime worker threads to spawn. Default is (number of CPU cores minus one).",
         
         "backpressure_policy": {
-        "enable_throttle": "Turn on/off injecting delays when a client exceeds the throttle threshold.",
-        "throttle_threshold": "Number of queued messages before throttling starts (default 100).",
-        "enable_flow_control": "Turn on/off pausing reads when queue size exceeds the flow-control threshold.",
-        "flow_control_threshold": "Number of queued messages before flow control starts (default 300).",
-        "enable_disconnect": "Turn on/off forcefully disconnecting clients under extreme backlog.",
-        "disconnect_threshold": "Number of queued messages before a client is disconnected (default 500)."
+            "enable_throttle": "Turn on/off injecting delays when a client exceeds the throttle threshold.",
+            "throttle_threshold": "Number of queued messages before throttling starts (default 100).",
+            "enable_flow_control": "Turn on/off pausing reads when queue size exceeds the flow-control threshold.",
+            "flow_control_threshold": "Number of queued messages before flow control starts (default 300).",
+            "enable_disconnect": "Turn on/off forcefully disconnecting clients under extreme backlog.",
+            "disconnect_threshold": "Number of queued messages before a client is disconnected (default 500)."
+        },
+
+        "dedicated_relay": {
+            "enabled": "If true, require identity-verified directed relay instead of legacy broadcast routing.",
+            "validation_adapter": "Payload validation format to use. Currently supported: \"aurora\".",
+            "max_frame_bytes": "Maximum newline-delimited payload size accepted by dedicated relay validation before rejection.",
+            "allowed_fingerprints": "List of identity fingerprints allowed to access the server. Payloads from identities outside this list are rejected.",
+            "communication_graph": "Directed adjacency map of sender fingerprint to allowed receiver fingerprints, used to prevent unrestricted broadcasting.",
+
+            "paths": {
+                "envelope_root": "Optional dot path to the signed relay envelope inside each payload. Use an empty string when the envelope is the payload root.",
+                "sender_identity": "Dot path, relative to the envelope root, where the sender identity object is found (for example \"from\").",
+                "receiver_identity": "Dot path, relative to the envelope root, where the receiver identity or receiver fingerprint is found (for example \"to\").",
+                "envelope_signature": "Dot path, relative to the envelope root, where the sender's envelope signature is found.",
+                "sender_signing_key": "Dot path, relative to the envelope root, where the sender identity's public signing key is found.",
+                "sender_identity_signature": "Dot path, relative to the envelope root, where the sender identity self-signature is found."
+            },
+
+            "policy": {
+                "allow_receiverless_binding": "Allow a valid signed payload without a receiver to bind the connection to the sender identity.",
+                "route_receiverless_to_graph": "If true, receiverless valid payloads are relayed only to receivers listed for the sender in the communication graph.",
+                "reject_unknown_receiver": "If true, reject payloads addressed to receivers that are not in the allowed fingerprint list.",
+                "reject_when_receiver_disconnected": "If true, reject valid directed payloads when no connected client is currently bound to the receiver fingerprint."
+            },
+
+            "invalid_attempts": {
+                "enabled": "If true, track repeated invalid dedicated relay attempts by remote IP and apply backpressure.",
+                "window_secs": "Rolling time window in seconds used when counting invalid relay attempts.",
+                "max_entries": "Maximum number of remote IP entries retained in the invalid-attempt tracker.",
+                "throttle_threshold": "Invalid attempts within the window before throttle delay is applied.",
+                "flow_control_threshold": "Invalid attempts within the window before flow-control delay is applied.",
+                "disconnect_threshold": "Invalid attempts within the window before the connection is closed.",
+                "quarantine_threshold": "Invalid attempts within the window before the remote IP is quarantined."
+            }
         }
         
     }

@@ -2,7 +2,11 @@
 // - `prelude::*` gives us the common traits and types.
 // - `PyModule` and `PyDict` let us work with Python modules and dicts.
 // - `Bound` helps us hold a reference into Python data safely.
-use pyo3::{prelude::*, types::{PyModule, PyDict}, Bound};
+use pyo3::{
+    Bound,
+    prelude::*,
+    types::{PyDict, PyModule},
+};
 
 // Public module for parsing and validating server configuration provided by Python.
 pub mod config;
@@ -14,9 +18,9 @@ pub mod logger;
 mod server;
 
 // Pull in the specific items we need so we don't have to write full paths later.
+use config::ServerConfig;
 use logger::init_logger;
 use server::run_server;
-use config::ServerConfig;
 
 /// Expose this Rust function to Python as `start_tokio_server(name, config)`.
 /// Responsibilities:
@@ -42,14 +46,15 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
     // Build a multi-threaded Tokio runtime based on the `worker_threads` value.
     // This runtime drives all our async I/O and timers.
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(server_config.worker_threads)   // how many threads to use
-        .thread_name("rust-server-worker")               // helpful for debugging
-        .enable_all()                                    // turn on I/O, timers, signals
+        .worker_threads(server_config.worker_threads) // how many threads to use
+        .thread_name("rust-server-worker") // helpful for debugging
+        .enable_all() // turn on I/O, timers, signals
         .build()
-        .map_err(|e|                                     // translate build errors into Python errors
+        .map_err(
+            |e|                                     // translate build errors into Python errors
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 format!("Failed to build Tokio runtime: {}", e)
-            )
+            ),
         )?;
 
     // Create or retrieve a logger instance per the config
@@ -57,7 +62,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
 
     // Run the server inside the Tokio runtime without holding Python's Global Interpreter Lock.
     // This lets Python handle other things (like signals) while our Rust code runs.
-    let server_result = _py.allow_threads(|| {
+    let server_result = _py.detach(|| {
         rt.block_on(async {
             // Call our main server loop.
             match run_server(server_config, logger.clone()).await {
@@ -73,9 +78,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
 
     // If the server returned an error, convert it into a Python RuntimeError.
     server_result.map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Server execution failed: {}", e)
-        )
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("Server execution failed: {}", e))
     })?;
 
     // Everything went smoothly. Tell Python we're done.

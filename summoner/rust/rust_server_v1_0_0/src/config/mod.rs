@@ -137,8 +137,8 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         
         // Helper: look up `key` in the dict, or fall back to `default`.
         // If the Python value has the wrong type, we warn but still use `default`.
-        fn extract_or<'py, T: FromPyObject<'py>>(
-            dict: &'py Bound<'py, PyDict>,
+        fn extract_or<'py, T: FromPyObjectOwned<'py>>(
+            dict: &Bound<'py, PyDict>,
             key: &str,
             default: T
         ) -> T {
@@ -146,8 +146,8 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
                 // Key exists; try to convert it to Rust type T
                 Ok(Some(value)) => match value.extract::<T>() {
                     Ok(val) => val,                 // Good conversion
-                    Err(err) => {
-                        eprintln!("Warning: '{}' has wrong type: {}", key, err);
+                    Err(_) => {
+                        eprintln!("Warning: '{}' has wrong type", key);
                         default                      // Fall back
                     }
                 },
@@ -197,7 +197,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         // Now handle the nested "backpressure_policy" dict, if provided
         let bp_dict: Bound<'py, PyDict> = match dict.get_item("backpressure_policy")? {
             // If it's a dict, use it
-            Some(obj) => match obj.downcast::<PyDict>() {
+            Some(obj) => match obj.cast::<PyDict>() {
                 Ok(downcasted) => downcasted.clone(),
                 // If it wasn't a dict, reuse the top-level dict to get defaults
                 Err(_) => dict.clone(),
@@ -219,7 +219,7 @@ impl<'py> TryFrom<&Bound<'py, PyDict>> for ServerConfig {
         // Now handle the nested "logger" dict, if provided
         let logger_dict: Bound<'py, PyDict> = match dict.get_item("logger")? {
             // If it's a dict, use it
-            Some(obj) => match obj.downcast::<PyDict>() {
+            Some(obj) => match obj.cast::<PyDict>() {
                 Ok(downcasted) => downcasted.clone(),
                 Err(_)         => dict.clone(),
             },

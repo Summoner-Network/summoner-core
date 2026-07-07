@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use crate::logger::Logger;
@@ -9,7 +9,7 @@ use crate::logger::Logger;
 // Tracks quarantined clients and how long they should be blocked.
 #[derive(Debug)]
 pub struct QuarantineList {
-    quarantined: HashMap<SocketAddr, Instant>,
+    quarantined: HashMap<IpAddr, Instant>,
     cooldown: Duration,
 }
 
@@ -24,12 +24,22 @@ impl QuarantineList {
 
     /// Add a client to the quarantine list.
     pub fn insert(&mut self, addr: SocketAddr) {
-        self.quarantined.insert(addr, Instant::now());
+        self.insert_ip(addr.ip());
+    }
+
+    /// Add an IP address to the quarantine list.
+    pub fn insert_ip(&mut self, ip: IpAddr) {
+        self.quarantined.insert(ip, Instant::now());
     }
 
     /// Returns true if the client is still quarantined.
     pub fn is_quarantined(&self, addr: &SocketAddr) -> bool {
-        if let Some(&start) = self.quarantined.get(addr) {
+        self.is_ip_quarantined(&addr.ip())
+    }
+
+    /// Returns true if the IP is still quarantined.
+    pub fn is_ip_quarantined(&self, ip: &IpAddr) -> bool {
+        if let Some(&start) = self.quarantined.get(ip) {
             start.elapsed() < self.cooldown
         } else {
             false

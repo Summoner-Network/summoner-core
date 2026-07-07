@@ -1,6 +1,6 @@
 /// === IMPORTS ===
-
 // Standard library type for holding an IP address and port together.
+use std::io;
 use std::net::SocketAddr;
 
 // Arc is an atomic reference counter for shared ownership across threads/tasks.
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 
 // Utilities for buffered, line-by-line asynchronous I/O on TCP streams.
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 // Asynchronous synchronization and messaging:
 // - Mutex: async-aware lock for exclusive data access.
@@ -25,7 +25,7 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio::time::{self, Duration, Instant};
 
 // Macro for building JSON payloads when broadcasting client messages.
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 
 // Clone-on-write string type: avoids extra allocations when we don't modify the string.
 use std::borrow::Cow;
@@ -33,14 +33,12 @@ use std::borrow::Cow;
 // Reference-counted byte buffer: enables zero-copy sharing of message data.
 use bytes::Bytes;
 
-
 /// === MODULES ===
-
 // Private modules handling specific server features.
-mod backpressure;   // queue monitoring and control commands
-mod ratelimiter;    // per-client rate limiting
-mod quarantine;     // temporary client bans
-
+mod backpressure; // queue monitoring and control commands
+mod dedicated_relay; // signed identity relay validation and routing decisions
+mod quarantine;
+mod ratelimiter; // per-client rate limiting // temporary client bans
 
 // Import the parsed ServerConfig struct that holds all user settings.
 use crate::config::ServerConfig;
@@ -51,12 +49,22 @@ use crate::logger::{Logger, prune_content_value};
 // Backpressure commands and helper to spawn the backpressure monitoring task.
 use crate::server::backpressure::{BackpressureCommand, ClientCommand, spawn_backpressure_monitor};
 
+// Dedicated relay validator and invalid-attempt tracker.
+use crate::server::dedicated_relay::{
+    InvalidAttemptAction, InvalidAttemptTracker, RouteDecision, decide_route,
+};
+
 // Token-bucket-style rate limiter for each client's message flow.
 use crate::server::ratelimiter::RateLimiter;
 
 // Quarantine list for tracking and expiring banned clients over time.
 use crate::server::quarantine::QuarantineList;
 
+enum BoundedLineRead {
+    Line(String),
+    Eof,
+    TooLarge,
+}
 
 /// === TYPES ===
 
@@ -72,13 +80,15 @@ pub struct Client {
 
     // Channel to send per-client control commands (throttle, flow-control) to that client's task.
     pub control_tx: mpsc::Sender<ClientCommand>,
+
+    // Verified sender identity fingerprint associated with this live connection.
+    pub verified_identity_fp: Arc<RwLock<Option<String>>>,
 }
 
 // A shared, asynchronous list of all connected clients.
 // - Arc allows multiple owners across tasks.
 // - RwLock lets many readers (e.g. broadcasts) but only one writer (add/remove) at a time.
 pub type ClientList = Arc<RwLock<Vec<Client>>>;
-
 
 /// === RUN_SERVER ===
 
@@ -114,14 +124,16 @@ pub async fn run_server(
         mpsc::channel::<(SocketAddr, usize)>(config.connection_buffer_size);
 
     // Channel used by the backpressure monitor to send commands (Throttle, Disconnect, etc.)
-    let (command_tx, command_rx) =
-        mpsc::channel::<BackpressureCommand>(config.command_buffer_size);
+    let (command_tx, command_rx) = mpsc::channel::<BackpressureCommand>(config.command_buffer_size);
 
     // Track which clients are quarantined (banned temporarily)
     // Wrapped in Arc+Mutex for safe, exclusive access when marking or cleaning entries
-    let quarantine_list = Arc::new(Mutex::new(
-        QuarantineList::new(Duration::from_secs(config.quarantine_cooldown_secs))
-    ));
+    let quarantine_list = Arc::new(Mutex::new(QuarantineList::new(Duration::from_secs(
+        config.quarantine_cooldown_secs,
+    ))));
+
+    // Track invalid signed-relay attempts by IP, bounded by config and TTL cleanup.
+    let invalid_attempts = Arc::new(Mutex::new(InvalidAttemptTracker::new()));
 
     // Spawn a background task that every N seconds removes old entries from quarantine
     // We keep the JoinHandle so we can cancel it cleanly on shutdown
@@ -154,6 +166,7 @@ pub async fn run_server(
         backpressure_tx,
         command_rx,
         quarantine_list,
+        invalid_attempts,
         config,
         logger,
     )
@@ -191,15 +204,16 @@ fn spawn_shutdown_listener(
 
 /// Listens for new clients, spawns per-client tasks, and handles shutdown/backpressure
 async fn accept_connections(
-    listener: TcpListener,                      // TCP socket we bound in run_server
-    clients: ClientList,                        // Shared list of connected clients
-    shutdown_tx: broadcast::Sender<()>,         // Sender to broadcast shutdown to clients
-    mut shutdown_rx: broadcast::Receiver<()>,   // Receiver to hear the shutdown signal
+    listener: TcpListener,                    // TCP socket we bound in run_server
+    clients: ClientList,                      // Shared list of connected clients
+    shutdown_tx: broadcast::Sender<()>,       // Sender to broadcast shutdown to clients
+    mut shutdown_rx: broadcast::Receiver<()>, // Receiver to hear the shutdown signal
     backpressure_tx: mpsc::Sender<(SocketAddr, usize)>, // Where client tasks report queue sizes
     mut command_rx: mpsc::Receiver<BackpressureCommand>, // Commands from the backpressure monitor
     quarantine_list: Arc<Mutex<QuarantineList>>, // Tracks temporarily banned clients
-    config: ServerConfig,                       // All of our runtime settings
-    logger: Logger,                             // Logging handle
+    invalid_attempts: Arc<Mutex<InvalidAttemptTracker>>, // Tracks invalid dedicated relay attempts
+    config: ServerConfig,                     // All of our runtime settings
+    logger: Logger,                           // Logging handle
 ) {
     // A simple counter to track how many clients are currently connected
     let connection_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -220,6 +234,7 @@ async fn accept_connections(
                             &shutdown_tx,
                             &backpressure_tx,
                             &quarantine_list,
+                            &invalid_attempts,
                             connection_count.clone(), // share the counter
                             &config,
                             &logger,
@@ -275,7 +290,7 @@ async fn handle_backpressure_command(
         BackpressureCommand::Throttle(addr) | BackpressureCommand::FlowControl(addr) => {
             // Decide which control command to send
             let control_cmd = match cmd {
-                BackpressureCommand::Throttle(_)    => ClientCommand::Throttle,
+                BackpressureCommand::Throttle(_) => ClientCommand::Throttle,
                 BackpressureCommand::FlowControl(_) => ClientCommand::FlowControl,
                 _ => unreachable!(),
             };
@@ -298,10 +313,13 @@ async fn handle_backpressure_command(
                     ));
                 }
                 let emoji = match control_cmd {
-                    ClientCommand::Throttle    => "⏳",
+                    ClientCommand::Throttle => "⏳",
                     ClientCommand::FlowControl => "⏸️",
                 };
-                logger.info(&format!("{} {:?} requested for {}", emoji, control_cmd, addr));
+                logger.info(&format!(
+                    "{} {:?} requested for {}",
+                    emoji, control_cmd, addr
+                ));
             } else {
                 logger.warn(&format!(
                     "Backpressure command for unknown client {}: {:?}",
@@ -314,28 +332,32 @@ async fn handle_backpressure_command(
 
 /// Validates a new TCP connection and then spawns its session task
 async fn handle_new_connection(
-    stream: TcpStream,                           // The raw TCP connection
-    addr: SocketAddr,                            // Remote client address (IP:port)
-    clients: &ClientList,                        // Shared list of all active clients
-    shutdown_tx: &broadcast::Sender<()>,         // Sender to broadcast shutdown to each client
+    stream: TcpStream,                                     // The raw TCP connection
+    addr: SocketAddr,                                      // Remote client address (IP:port)
+    clients: &ClientList,                                  // Shared list of all active clients
+    shutdown_tx: &broadcast::Sender<()>, // Sender to broadcast shutdown to each client
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>, // Where clients report their queue sizes
     quarantine_list: &Arc<Mutex<QuarantineList>>, // Tracks temporarily banned clients
+    invalid_attempts: &Arc<Mutex<InvalidAttemptTracker>>, // Tracks invalid dedicated relay attempts
     connection_count: Arc<std::sync::atomic::AtomicUsize>, // Global counter of active clients
-    config: &ServerConfig,                       // All runtime settings
-    logger: &Logger,                             // Logging handle
+    config: &ServerConfig,               // All runtime settings
+    logger: &Logger,                     // Logging handle
 ) {
     // 1) Reject any client still in quarantine
     {
         let q = quarantine_list.lock().await;
         if q.is_quarantined(&addr) {
-            logger.info(&format!("🔒 Client {} is quarantined — ignoring connection", addr));
-            return;  // Drop the stream by returning early
+            logger.info(&format!(
+                "🔒 Client {} is quarantined — ignoring connection",
+                addr
+            ));
+            return; // Drop the stream by returning early
         }
     }
 
     // 2) Prevent duplicate connections from the same address
     {
-        let list = clients.read().await;  // Read-lock while checking
+        let list = clients.read().await; // Read-lock while checking
         if list.iter().any(|c| c.addr == addr) {
             logger.warn(&format!("Duplicate connection from {} rejected", addr));
             return;
@@ -344,7 +366,10 @@ async fn handle_new_connection(
 
     // 3) Disable Nagle's algorithm to reduce latency (small packets go out immediately)
     if let Err(e) = stream.set_nodelay(true) {
-        logger.warn(&format!("⚠️  Failed to set TCP_NODELAY for {}: {}", addr, e));
+        logger.warn(&format!(
+            "⚠️  Failed to set TCP_NODELAY for {}: {}",
+            addr, e
+        ));
     }
 
     // 4) Split the stream into read/write halves for independent tasks
@@ -358,6 +383,7 @@ async fn handle_new_connection(
         addr,
         writer: Arc::new(Mutex::new(writer_half)),
         control_tx,
+        verified_identity_fp: Arc::new(RwLock::new(None)),
     };
 
     // 7) Register the client in the global list under a write-lock
@@ -368,16 +394,21 @@ async fn handle_new_connection(
 
     // 8) Increment and log the connection count
     let current = connection_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    logger.info(&format!("🔌 {} connected. Active connections: {}", addr, current));
+    logger.info(&format!(
+        "🔌 {} connected. Active connections: {}",
+        addr, current
+    ));
 
     // 9) Clone everything needed into the async task
-    let clients_for_task    = clients.clone();
-    let logger              = logger.clone();
-    let config              = config.clone();
-    let mut shutdown_rx     = shutdown_tx.subscribe();
-    let backpressure_tx     = backpressure_tx.clone();
-    let client_timeout      = config.client_timeout;
-    let rate_limit          = config.rate_limit;
+    let clients_for_task = clients.clone();
+    let logger = logger.clone();
+    let config = config.clone();
+    let mut shutdown_rx = shutdown_tx.subscribe();
+    let backpressure_tx = backpressure_tx.clone();
+    let quarantine_list = quarantine_list.clone();
+    let invalid_attempts = invalid_attempts.clone();
+    let client_timeout = config.client_timeout;
+    let rate_limit = config.rate_limit;
 
     // 10) Spawn the per-client session loop
     // Spawn the per-client session loop and log teardown cleanly
@@ -389,6 +420,8 @@ async fn handle_new_connection(
             clients_for_task,
             &mut shutdown_rx,
             &backpressure_tx,
+            &quarantine_list,
+            &invalid_attempts,
             client_timeout,
             rate_limit,
             control_rx,
@@ -402,9 +435,11 @@ async fn handle_new_connection(
 
         // Decrement the counter and log how many remain
         let remaining = connection_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
-        logger.info(&format!("🔌 {} disconnected. Active connections: {}", addr, remaining));
+        logger.info(&format!(
+            "🔌 {} disconnected. Active connections: {}",
+            addr, remaining
+        ));
     });
-
 }
 
 /// Manages a single client's session:
@@ -418,6 +453,8 @@ async fn handle_connection(
     clients: ClientList,
     shutdown_rx: &mut broadcast::Receiver<()>,
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    invalid_attempts: &Arc<Mutex<InvalidAttemptTracker>>,
     client_timeout: Option<Duration>,
     rate_limit: u32,
     control_rx: mpsc::Receiver<ClientCommand>,
@@ -425,7 +462,7 @@ async fn handle_connection(
     logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wrap the read half for line-based async I/O
-    let mut reader = BufReader::new(reader_half).lines();
+    let mut reader = BufReader::new(reader_half);
 
     // Per-client rate limiter
     let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(rate_limit)));
@@ -437,6 +474,8 @@ async fn handle_connection(
         &clients,
         shutdown_rx,
         backpressure_tx,
+        quarantine_list,
+        invalid_attempts,
         client_timeout,
         rate_limiter,
         config,
@@ -446,7 +485,10 @@ async fn handle_connection(
     .await
     {
         // Log any unexpected error during the session
-        logger.warn(&format!("⚠️ Error in client {} session: {}", client.addr, e));
+        logger.warn(&format!(
+            "⚠️ Error in client {} session: {}",
+            client.addr, e
+        ));
     }
 
     // Remove this client from the active list and compute how many remain
@@ -465,7 +507,6 @@ async fn handle_connection(
     Ok(())
 }
 
-
 /// === MESSAGES ===
 
 /// Manages a single client session until disconnect or shutdown:
@@ -475,7 +516,7 @@ async fn handle_connection(
 /// - Sends a shutdown notice on server exit  
 async fn handle_client_messages(
     // Line-based reader for this client's incoming data
-    reader: &mut Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
+    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
     // Metadata and writer handle for this client
     sender: &Client,
     // Shared list of all clients, used for broadcasting
@@ -484,6 +525,8 @@ async fn handle_client_messages(
     shutdown_rx: &mut broadcast::Receiver<()>,
     // Channel to report our outgoing-queue length for backpressure
     backpressure_tx: &mpsc::Sender<(SocketAddr, usize)>,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    invalid_attempts: &Arc<Mutex<InvalidAttemptTracker>>,
     // How long before we drop an idle client
     timeout: Option<Duration>,
     // Per-client rate limiter
@@ -502,35 +545,63 @@ async fn handle_client_messages(
     let mut last_active = Instant::now();
 
     // Timer that fires every `timeout_check_interval_secs` to enforce inactivity
-    let mut timeout_interval = time::interval(Duration::from_secs(
-        config.timeout_check_interval_secs,
-    ));
+    let mut timeout_interval =
+        time::interval(Duration::from_secs(config.timeout_check_interval_secs));
 
     // Main loop: handle whichever event happens first
     loop {
         tokio::select! {
             // 1) Incoming line from client
-            maybe_line = reader.next_line() => {
+            maybe_line = read_bounded_line(
+                reader,
+                if config.dedicated_relay.enabled {
+                    config.dedicated_relay.max_frame_bytes
+                } else {
+                    usize::MAX
+                },
+            ) => {
                 // Update last-active timestamp immediately
                 last_active = Instant::now();
 
                 match maybe_line {
-                    Ok(Some(line)) => {
+                    Ok(BoundedLineRead::Line(line)) => {
                         // A full line arrived: process rate-limit, logging, broadcast
-                        process_client_line(
+                        let keep_running = process_client_line(
                             line,
                             sender,
                             clients,
                             &rate_limiter,
                             queue_tx.clone(),
+                            quarantine_list,
+                            invalid_attempts,
                             config,
                             logger,
                         ).await;
+                        if !keep_running {
+                            break;
+                        }
                     }
-                    Ok(None) => {
+                    Ok(BoundedLineRead::Eof) => {
                         // EOF: client closed connection cleanly
                         logger.info(&format!("⚠️ {} disconnected gracefully.", sender.addr));
                         break;
+                    }
+                    Ok(BoundedLineRead::TooLarge) => {
+                        logger.warn(&format!(
+                            "Dedicated relay rejected oversized frame from {}",
+                            sender.addr
+                        ));
+                        let keep_running = handle_invalid_relay_attempt(
+                            sender,
+                            quarantine_list,
+                            invalid_attempts,
+                            config,
+                            logger,
+                            "frame_too_large",
+                        ).await;
+                        if !keep_running {
+                            break;
+                        }
                     }
                     Err(e) => {
                         // I/O error reading from socket
@@ -598,6 +669,76 @@ async fn handle_client_messages(
     Ok(())
 }
 
+async fn read_bounded_line<R>(
+    reader: &mut R,
+    max_frame_bytes: usize,
+) -> Result<BoundedLineRead, io::Error>
+where
+    R: AsyncBufReadExt + Unpin,
+{
+    let limit = max_frame_bytes.max(1);
+    let mut out = Vec::new();
+
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if out.is_empty() {
+                return Ok(BoundedLineRead::Eof);
+            }
+            break;
+        }
+
+        let newline_pos = available.iter().position(|byte| *byte == b'\n');
+        let take_len = newline_pos
+            .map(|pos| pos.saturating_add(1))
+            .unwrap_or(available.len());
+        let delimiter_len = usize::from(newline_pos.is_some());
+        let content_take_len = take_len.saturating_sub(delimiter_len);
+
+        if out.len().saturating_add(content_take_len) > limit {
+            if let Some(pos) = newline_pos {
+                reader.consume(pos.saturating_add(1));
+            } else {
+                let consumed = available.len();
+                reader.consume(consumed);
+                discard_until_newline(reader).await?;
+            }
+            return Ok(BoundedLineRead::TooLarge);
+        }
+
+        out.extend_from_slice(&available[..take_len]);
+        reader.consume(take_len);
+
+        if newline_pos.is_some() {
+            break;
+        }
+    }
+
+    String::from_utf8(out)
+        .map(BoundedLineRead::Line)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+async fn discard_until_newline<R>(reader: &mut R) -> Result<(), io::Error>
+where
+    R: AsyncBufReadExt + Unpin,
+{
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(pos) = available.iter().position(|byte| *byte == b'\n') {
+            reader.consume(pos.saturating_add(1));
+            return Ok(());
+        }
+
+        let consumed = available.len();
+        reader.consume(consumed);
+    }
+}
+
 /// Responds to a throttle or flow-control command by pausing the client's processing
 ///
 /// # Behavior
@@ -641,9 +782,11 @@ async fn process_client_line(
     clients: &ClientList,
     rate_limiter: &Arc<Mutex<RateLimiter>>,
     queue_tx: mpsc::Sender<usize>,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    invalid_attempts: &Arc<Mutex<InvalidAttemptTracker>>,
     config: &ServerConfig,
     logger: &Logger,
-) {
+) -> bool {
     // 1) Rate limit: reset & check in one call
     let within_limit = rate_limiter.lock().await.check_limit();
     if !within_limit {
@@ -652,7 +795,7 @@ async fn process_client_line(
         let _ = w
             .write_all(b"Warning: You are sending messages too quickly. Please slow down.\n")
             .await;
-        return;
+        return true;
     }
 
     // 2) Build the envelope (full fidelity)
@@ -663,8 +806,97 @@ async fn process_client_line(
     });
     let envelope_text = envelope.to_string();
 
+    if config.dedicated_relay.enabled {
+        match decide_route(content, &config.dedicated_relay) {
+            RouteDecision::LegacyBroadcast => {
+                log_client_message(sender, content, config, logger);
+                broadcast_message(clients, sender, &envelope_text, queue_tx, logger).await;
+                return true;
+            }
+            RouteDecision::BindOnly { sender_fp } => {
+                bind_client_identity(sender, &sender_fp).await;
+                log_client_message(sender, content, config, logger);
+                logger.info(&format!(
+                    "🔐 Dedicated relay bound {} to identity {}",
+                    sender.addr, sender_fp
+                ));
+                return true;
+            }
+            RouteDecision::Directed {
+                sender_fp,
+                receiver_fp,
+            } => {
+                bind_client_identity(sender, &sender_fp).await;
+                log_client_message(sender, content, config, logger);
+                let delivered = route_message_to_fingerprints(
+                    clients,
+                    sender,
+                    &[receiver_fp.clone()],
+                    &envelope_text,
+                    queue_tx,
+                    logger,
+                )
+                .await;
+                if delivered == 0
+                    && config
+                        .dedicated_relay
+                        .policy
+                        .reject_when_receiver_disconnected
+                {
+                    warn_sender(sender, "Warning: Receiver identity is not connected.\n").await;
+                    logger.warn(&format!(
+                        "Dedicated relay rejected message from {} to disconnected identity {}",
+                        sender_fp, receiver_fp
+                    ));
+                }
+                return true;
+            }
+            RouteDecision::GraphFanout {
+                sender_fp,
+                receiver_fps,
+            } => {
+                bind_client_identity(sender, &sender_fp).await;
+                log_client_message(sender, content, config, logger);
+                let delivered = route_message_to_fingerprints(
+                    clients,
+                    sender,
+                    &receiver_fps,
+                    &envelope_text,
+                    queue_tx,
+                    logger,
+                )
+                .await;
+                logger.info(&format!(
+                    "🔐 Dedicated relay routed receiverless message from {} to {} graph peer(s)",
+                    sender_fp, delivered
+                ));
+                return true;
+            }
+            RouteDecision::Reject { reason } => {
+                return handle_invalid_relay_attempt(
+                    sender,
+                    quarantine_list,
+                    invalid_attempts,
+                    config,
+                    logger,
+                    &reason,
+                )
+                .await;
+            }
+        }
+    }
+
+    log_client_message(sender, content, config, logger);
+
+    // 7) Send the un-filtered payload on to clients
+    broadcast_message(clients, sender, &envelope_text, queue_tx, logger).await;
+    true
+}
+
+fn log_client_message(sender: &Client, content: &str, config: &ServerConfig, logger: &Logger) {
     // 3) Parse the client's content *once*
-    let json_content: JsonValue = serde_json::from_str(&content).unwrap_or(JsonValue::String(content.to_string()));
+    let json_content: JsonValue =
+        serde_json::from_str(&content).unwrap_or(JsonValue::String(content.to_string()));
 
     // 4) Move it into pruning or keep it as-is
     let pruned_content = if config.logger.log_keys.is_some() {
@@ -689,9 +921,75 @@ async fn process_client_line(
 
     // 6) Emit one log call
     logger.info(&log_body);
+}
 
-    // 7) Send the un-filtered payload on to clients
-    broadcast_message(clients, sender, &envelope_text, queue_tx, logger).await;
+async fn bind_client_identity(sender: &Client, sender_fp: &str) {
+    let mut slot = sender.verified_identity_fp.write().await;
+    if slot.as_deref() != Some(sender_fp) {
+        *slot = Some(sender_fp.to_string());
+    }
+}
+
+async fn handle_invalid_relay_attempt(
+    sender: &Client,
+    quarantine_list: &Arc<Mutex<QuarantineList>>,
+    invalid_attempts: &Arc<Mutex<InvalidAttemptTracker>>,
+    config: &ServerConfig,
+    logger: &Logger,
+    reason: &str,
+) -> bool {
+    let action = {
+        let mut attempts = invalid_attempts.lock().await;
+        attempts.record(
+            sender.addr.ip(),
+            reason,
+            &config.dedicated_relay.invalid_attempts,
+        )
+    };
+
+    logger.warn(&format!(
+        "Dedicated relay rejected payload from {}: {} ({:?})",
+        sender.addr, reason, action
+    ));
+
+    match action {
+        InvalidAttemptAction::LogOnly => true,
+        InvalidAttemptAction::Throttle => {
+            warn_sender(sender, "Warning: Invalid signed relay payload.\n").await;
+            tokio::time::sleep(Duration::from_millis(config.throttle_delay_ms)).await;
+            true
+        }
+        InvalidAttemptAction::FlowControl => {
+            warn_sender(sender, "Warning: Repeated invalid signed relay payloads.\n").await;
+            tokio::time::sleep(Duration::from_millis(config.flow_control_delay_ms)).await;
+            true
+        }
+        InvalidAttemptAction::Disconnect => {
+            warn_sender(
+                sender,
+                "Warning: Disconnected after repeated invalid relay payloads.\n",
+            )
+            .await;
+            false
+        }
+        InvalidAttemptAction::Quarantine => {
+            {
+                let mut quarantine = quarantine_list.lock().await;
+                quarantine.insert_ip(sender.addr.ip());
+            }
+            warn_sender(
+                sender,
+                "Warning: IP quarantined after repeated invalid relay payloads.\n",
+            )
+            .await;
+            false
+        }
+    }
+}
+
+async fn warn_sender(sender: &Client, message: &str) {
+    let mut w = sender.writer.lock().await;
+    let _ = w.write_all(message.as_bytes()).await;
 }
 
 /// Removes the last `\n` from the string if present.
@@ -706,11 +1004,11 @@ fn remove_last_newline(s: &str) -> &str {
 
 /// Sends `msg` to every client except the sender, reporting queue size for backpressure:
 async fn broadcast_message(
-    clients: &ClientList,               // Shared list of all connected clients
-    sender: &Client,                    // The client who sent the original message
-    msg: &str,                          // The text payload to broadcast
-    queue_tx: mpsc::Sender<usize>,      // Channel to report current broadcast queue size
-    logger: &Logger,                    // Logger for warning on send failures
+    clients: &ClientList,          // Shared list of all connected clients
+    sender: &Client,               // The client who sent the original message
+    msg: &str,                     // The text payload to broadcast
+    queue_tx: mpsc::Sender<usize>, // Channel to report current broadcast queue size
+    logger: &Logger,               // Logger for warning on send failures
 ) {
     // 1) Take a quick snapshot of all other clients under a read lock.
     //    This lock is held only long enough to clone the necessary Client structs.
@@ -718,26 +1016,65 @@ async fn broadcast_message(
         let guard = clients.read().await;
         guard
             .iter()
-            .filter(|c| c.addr != sender.addr)  // Exclude the original sender
-            .cloned()                           // Clone the Arc handles cheaply
-            .collect()                         // Collect into a Vec for iteration
+            .filter(|c| c.addr != sender.addr) // Exclude the original sender
+            .cloned() // Clone the Arc handles cheaply
+            .collect() // Collect into a Vec for iteration
     };
 
     // 2) Report how many clients we're about to send to.
     //    Using try_send ensures we never block; if the channel is full, we drop the report.
     let _ = queue_tx.try_send(snapshot.len());
 
-    // 3) Build the message bytes once, with a guaranteed trailing newline.
-    //    Wrapping in Arc<Bytes> makes cloning zero-copy for each task.
+    write_to_snapshot(snapshot, msg, logger).await;
+}
+
+/// Sends `msg` only to clients bound to one of the requested identity fingerprints.
+async fn route_message_to_fingerprints(
+    clients: &ClientList,
+    sender: &Client,
+    receiver_fps: &[String],
+    msg: &str,
+    queue_tx: mpsc::Sender<usize>,
+    logger: &Logger,
+) -> usize {
+    let candidates: Vec<Client> = {
+        let guard = clients.read().await;
+        guard
+            .iter()
+            .filter(|client| client.addr != sender.addr)
+            .cloned()
+            .collect()
+    };
+
+    let mut snapshot = Vec::new();
+    for client in candidates {
+        let fp = client.verified_identity_fp.read().await.clone();
+        if let Some(fp) = fp {
+            if receiver_fps.iter().any(|receiver_fp| receiver_fp == &fp) {
+                snapshot.push(client);
+            }
+        }
+    }
+
+    let count = snapshot.len();
+    let _ = queue_tx.try_send(count);
+    write_to_snapshot(snapshot, msg, logger).await;
+    count
+}
+
+/// Writes a relay payload to a prepared client snapshot.
+async fn write_to_snapshot(snapshot: Vec<Client>, msg: &str, logger: &Logger) {
+    // Build the message bytes once, with a guaranteed trailing newline.
+    // Wrapping in Arc<Bytes> makes cloning zero-copy for each task.
     let msg_bytes = Arc::new(Bytes::from(ensure_trailing_newline(msg).into_owned()));
 
-    // 4) For each client in our snapshot, spawn a small task to write asynchronously.
-    //    This way, a slow or stalled client can't hold up the others.
+    // For each client in our snapshot, spawn a small task to write asynchronously.
+    // This way, a slow or stalled client can't hold up the others.
     for client in snapshot {
-        let writer = client.writer.clone();  // Clone Arc<Mutex<...>> handle
-        let buf = msg_bytes.clone();         // Clone Arc<Bytes> pointer
-        let addr = client.addr;              // Capture address for logging
-        let log = logger.clone();            // Clone logger handle
+        let writer = client.writer.clone(); // Clone Arc<Mutex<...>> handle
+        let buf = msg_bytes.clone(); // Clone Arc<Bytes> pointer
+        let addr = client.addr; // Capture address for logging
+        let log = logger.clone(); // Clone logger handle
 
         tokio::spawn(async move {
             // Lock this client's writer just long enough to send the bytes
@@ -763,5 +1100,36 @@ fn ensure_trailing_newline(s: &str) -> Cow<'_, str> {
     } else {
         // Add a newline, allocating a new `String`
         Cow::Owned(format!("{s}\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bounded_line_read_discards_oversized_frame_and_keeps_next_line() {
+        let input = b"abcdef\nok\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        assert!(matches!(
+            read_bounded_line(&mut reader, 3).await.unwrap(),
+            BoundedLineRead::TooLarge
+        ));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 3).await.unwrap(),
+            BoundedLineRead::Line(line) if line == "ok\n"
+        ));
+    }
+
+    #[tokio::test]
+    async fn bounded_line_read_does_not_count_newline_against_limit() {
+        let input = b"abc\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        assert!(matches!(
+            read_bounded_line(&mut reader, 3).await.unwrap(),
+            BoundedLineRead::Line(line) if line == "abc\n"
+        ));
     }
 }
