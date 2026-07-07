@@ -62,7 +62,7 @@ pub fn start_tokio_server(_py: Python<'_>, name: String, config: Bound<PyDict>) 
 
     // Run the server inside the Tokio runtime without holding Python's Global Interpreter Lock.
     // This lets Python handle other things (like signals) while our Rust code runs.
-    let server_result = _py.allow_threads(|| {
+    let server_result = _py.detach(|| {
         rt.block_on(async {
             // Call our main server loop.
             match run_server(server_config, logger.clone()).await {
